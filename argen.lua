@@ -49,6 +49,8 @@ local pattern_shifts = {}
 local raw_densities = {}
 local densities = {}
 
+local is_firing = {}
+
 
 -- ------------------------------------------------------------------------
 -- core helpers
@@ -70,6 +72,14 @@ local function srand(x)
     x = 0
   end
   math.randomseed(x)
+end
+
+local function cos(x)
+  return math.cos(math.rad(x * 360))
+end
+
+local function sin(x)
+  return -math.sin(math.rad(x * 360))
 end
 
 
@@ -139,6 +149,7 @@ function init()
     raw_densities[r] = 0
     densities[r] = 0
     pattern_shifts[r] = 0
+    is_firing[r] = false
   end
 
   Timber.options.PLAY_MODE_BUFFER_DEFAULT = 4
@@ -206,6 +217,7 @@ end
 
 
 -- ------------------------------------------------------------------------
+-- timber
 
 local function is_timber_playing(sample_id)
   return tab.count(Timber.samples_meta[sample_id].positions) ~= 0
@@ -221,40 +233,6 @@ end
 
 
 -- ------------------------------------------------------------------------
--- arc utils
-
-local function arc_pos_to_rad(pos)
-  -- NB: value of 40 is super empirical
-  -- it depends of the overal length (64) but also the radius
-
-  local tau = math.pi * 2
-  return util.linlin(1, 64, 0, 40/tau, pos)
-end
-
-local function arc_segment_pos_bak(a, ring, from, to, level)
-
-  if from < 0 then
-    from = 64 + from
-  end
-  if to < 0 then
-    to = 64 + to
-  end
-
-  local from_angle = arc_pos_to_rad(from)
-  local to_angle = arc_pos_to_rad(to)
-
-  -- if from_angle < to_angle then
-    -- to_angle = to_angle + 1
-  -- end
-
-  a:segment(ring, from_angle, to_angle, level)
-end
-
-local function arc_segment_pos(a, ring, from, to, level)
-  a:segment(ring, from/10, to/10, level)
-end
-
--- ------------------------------------------------------------------------
 -- arc
 
 local pos = 1
@@ -267,16 +245,9 @@ function arc_redraw()
     pos = pos % 64
   end
 
-  -- NB: can only do 1 arc:segment call / redraw frame!
-
-  -- arc_segment_pos(a, 1, pos - 3, pos, 15)
-  -- arc_segment_pos(a, 1, pos - 5, pos - 3, 10)
-  -- arc_segment_pos(a, 1, pos - 10, pos - 5, 5)
-  -- arc_segment_pos(a, 1, 59, 62, 15)
-
   for r=1,4 do
+    is_firing[r] = false
     for i, v in ipairs(sparse_patterns[r]) do
-
       local radial_pos = (i + pos) + pattern_shifts[r]
       while radial_pos < 0 do
         radial_pos = radial_pos + 64
@@ -287,6 +258,7 @@ function arc_redraw()
       if v == 1 then
         if radial_pos % 64 == 1 then
           l = 15
+          is_firing[r] = true
           timber_play(r)
         else
           l = 3
@@ -338,7 +310,6 @@ function enc(n, d)
 end
 
 arc_delta = function(r, d)
-
   if k1 then
     if math.abs(d) > 4 then
       gen_pattern(patterns[r])
@@ -365,6 +336,32 @@ function redraw()
 
   screen.move(1, 8)
   screen.text(params:get("clock_tempo") .. " BPM")
+
+  local radius = 11
+  for r=1,4 do
+
+    local x = 128/4 * r - 2 * 3/4 * radius
+    local y = 64/2
+    screen.move(x + radius, y)
+    screen.circle(x, y, radius)
+    if is_firing[r] then
+      screen.fill()
+    else
+      screen.stroke()
+    end
+
+    for i=1,64 do
+      if sparse_patterns[r][i] == 1 then
+      local radial_pos = (i + pos) + pattern_shifts[r] + 16
+      while radial_pos < 0 do
+        radial_pos = radial_pos + 64
+      end
+
+        screen.pixel(x + (radius + 4) * cos(radial_pos/64) * -1, y + (radius + 4) * sin(radial_pos/64))
+      end
+    end
+
+  end
 
   screen.update()
 end
