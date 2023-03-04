@@ -8,9 +8,12 @@
 --    ▼ instructions below ▼
 --
 -- E1         - clock speed
+-- E2         - transpose
+-- E3         - filter freq
+-- K3 + E3    - filter req
 -- arc        - density
 -- K1 + arc   - randomize
--- K2 + arc   - offset
+-- K3 + arc   - offset
 --
 -- original idea by @stretta
 
@@ -21,12 +24,21 @@
 
 local lattice = require("lattice")
 local MusicUtil = require "musicutil"
+local ControlSpec = require "controlspec"
+local Formatters = require "formatters"
+
 
 -- ------------------------------------------------------------------------
 -- engine
 
 engine.name = "Timber"
 local Timber = include("timber/lib/timber_engine")
+
+local function format_st(param)
+  local formatted = param:get() .. " ST"
+  if param:get() > 0 then formatted = "+" .. formatted end
+  return formatted
+end
 
 
 -- ------------------------------------------------------------------------
@@ -152,6 +164,25 @@ function init()
     pattern_shifts[r] = 0
     is_firing[r] = false
   end
+
+  params:add{type = "control", id = "filter_freq", name = "Filter Cutoff", controlspec = ControlSpec.new(60, 20000, "exp", 0, 1000, "Hz"), formatter = Formatters.format_freq, action = function(v)
+               for i = 1, 4 do
+                 params:set('filter_freq_'..i, v)
+               end
+  end}
+
+  params:add{type = "control", id = "filter_resonance", name = "Filter Resonance", controlspec = ControlSpec.new(0, 1, "lin", 0, 0, ""), action = function(v)
+               for i = 1, 4 do
+                 params:set('filter_resonance_'..i, v)
+               end
+  end}
+
+  params:add{type = "number", id = "transpose", name = "Transpose", min = -48, max = 48, default = 0, formatter = format_st, action = function(v)
+         for i = 1, 4 do
+           params:set('transpose_'..i, v)
+         end
+  end}
+
 
   Timber.options.PLAY_MODE_BUFFER_DEFAULT = 4
   Timber.options.PLAY_MODE_STREAMING_DEFAULT = 3
@@ -305,8 +336,25 @@ function key(n, v)
 end
 
 function enc(n, d)
-  params:set("clock_tempo", params:get("clock_tempo") + d)
-  screen_dirty = true
+  if n == 1 then
+    params:set("clock_tempo", params:get("clock_tempo") + d)
+    return
+  end
+
+  if n == 2 then
+    params:set("transpose", params:get("transpose") + d)
+    return
+  end
+
+  if n == 3 then
+    if k2 then
+      params:set("filter_resonance", params:get("filter_resonance") + d/20)
+    else
+      params:set("filter_freq", params:get("filter_freq") + d * 50)
+    end
+    return
+  end
+
 end
 
 arc_delta = function(r, d)
@@ -317,7 +365,7 @@ arc_delta = function(r, d)
     return
   end
 
-  if k2 then
+  if k3 then
     pattern_shifts[r] = math.floor(pattern_shifts[r] + d/5) % 64
     return
   end
@@ -336,6 +384,15 @@ function redraw()
 
   screen.move(1, 8)
   screen.text(params:get("clock_tempo") .. " BPM")
+
+  screen.move(55, 8)
+  screen.text(format_st(params:lookup_param("transpose")))
+
+  screen.move(95, 8)
+  screen.text(Formatters.format_freq(params:lookup_param("filter_freq")))
+
+  screen.move(95, 16)
+  screen.text("Q: "..params:get("filter_resonance"))
 
   local radius = 11
   for r=1,4 do
