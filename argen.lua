@@ -64,6 +64,7 @@ local densities = {}
 
 local is_firing = {}
 
+local prev_pattern_refresh_t = {}
 
 -- ------------------------------------------------------------------------
 -- core helpers
@@ -162,10 +163,11 @@ function init()
     raw_densities[r] = 0
     densities[r] = 0
     pattern_shifts[r] = 0
+    prev_pattern_refresh_t[r] = 0
     is_firing[r] = false
   end
 
-  params:add{type = "control", id = "filter_freq", name = "Filter Cutoff", controlspec = ControlSpec.new(60, 20000, "exp", 0, 1000, "Hz"), formatter = Formatters.format_freq, action = function(v)
+  params:add{type = "control", id = "filter_freq", name = "Filter Cutoff", controlspec = ControlSpec.new(60, 20000, "exp", 0, 3000, "Hz"), formatter = Formatters.format_freq, action = function(v)
                for i = 1, 4 do
                  params:set('filter_freq_'..i, v)
                end
@@ -359,8 +361,10 @@ end
 
 arc_delta = function(r, d)
   if k1 then
-    if math.abs(d) > 4 then
+    local now = os.time()
+    if now - prev_pattern_refresh_t[r] > 1 then
       gen_pattern(patterns[r])
+      prev_pattern_refresh_t[r] = now
     end
     return
   end
@@ -398,7 +402,7 @@ function redraw()
   for r=1,4 do
 
     local x = 128/4 * r - 2 * 3/4 * radius
-    local y = 64/2
+    local y = 2*64/3
     screen.move(x + radius, y)
     screen.circle(x, y, radius)
     if is_firing[r] then
