@@ -66,6 +66,7 @@ local is_firing = {}
 
 local prev_pattern_refresh_t = {}
 
+
 -- ------------------------------------------------------------------------
 -- core helpers
 
@@ -403,8 +404,14 @@ function redraw()
 
     local x = 128/4 * r - 2 * 3/4 * radius
     local y = 2*64/3
-    screen.move(x + radius, y)
-    screen.circle(x, y, radius)
+
+    local radius2 = radius
+    if os.time() - prev_pattern_refresh_t[r] < 1 then
+      radius2 = radius / 3
+    end
+
+    screen.move(x + radius2, y)
+    screen.circle(x, y, radius2)
     if is_firing[r] then
       screen.fill()
     else
