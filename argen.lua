@@ -27,6 +27,7 @@ local a
 
 patterns = {}
 sparse_patterns = {}
+pattern_shifts = {}
 
 raw_densities = {}
 densities = {}
@@ -118,6 +119,7 @@ function init()
     sparse_patterns[r] = gen_empty_pattern()
     raw_densities[r] = 0
     densities[r] = 0
+    pattern_shifts[r] = 0
   end
 
   Timber.options.PLAY_MODE_BUFFER_DEFAULT = 4
@@ -137,7 +139,9 @@ function init()
   end
 
   Timber.load_sample(1, _path.audio .. 'common/808/808-BD.wav')
-  Timber.load_sample(2, _path.audio .. 'common/808/808-CP.wav')
+  Timber.load_sample(2, _path.audio .. 'common/808/808-CH.wav')
+  -- Timber.load_sample(2, _path.audio .. 'common/808/808-CY.wav')
+  -- Timber.load_sample(2, _path.audio .. 'common/808/808-RS.wav')
   Timber.load_sample(3, _path.audio .. 'common/808/808-SD.wav')
   Timber.load_sample(4, _path.audio .. 'common/808/808-OH.wav')
 
@@ -245,16 +249,22 @@ function arc_redraw()
 
   for r=1,4 do
     for i, v in ipairs(sparse_patterns[r]) do
+
+      local radial_pos = (i + pos) + pattern_shifts[r]
+      while radial_pos < 0 do
+        radial_pos = radial_pos + 64
+      end
+
     -- for i, v in ipairs(patterns[r]) do
       local l = 0
       if v == 1 then
-        if (i + pos) % 64 == 1 then
+        if radial_pos % 64 == 1 then
           l = 15
           timber_play(r)
         else
-          l = 5
+          l = 3
         end
-        a:led(r, i + pos, l)
+        a:led(r, radial_pos, l)
       end
     end
 
@@ -264,22 +274,6 @@ function arc_redraw()
 
 
   a:refresh()
-end
-
-arc_delta = function(r, d)
-  raw_densities[r] = util.clamp(raw_densities[r] + d, 0, 1000)
-  densities[r] = util.linlin(0, 1000, 0, 10, raw_densities[r])
-end
-
-local function matches_density(pos, density)
-  for i=1,density do
-    local mod = 10 - i + 1
-    if mod >= 1 and pos % mod == 0 then
-      return true
-    end
-  end
-
-  return false
 end
 
 function arc_process ()
@@ -294,6 +288,44 @@ function arc_process ()
     end
   end
 end
+
+
+-- ------------------------------------------------------------------------
+-- controls
+
+local k1 = false
+local k2 = false
+local k3 = false
+
+function key(n, v)
+  if n == 1 then
+    k1 = (v == 1)
+  elseif n == 2 then
+    k2 = (v == 1)
+  elseif n == 3 then
+    k3 = (v == 1)
+  end
+end
+
+
+arc_delta = function(r, d)
+
+  if k1 then
+    if math.abs(d) > 4 then
+      gen_pattern(patterns[r])
+    end
+    return
+  end
+
+  if k2 then
+    pattern_shifts[r] = math.floor(pattern_shifts[r] + d/5) % 64
+    return
+  end
+
+  raw_densities[r] = util.clamp(raw_densities[r] + d, 0, 1000)
+  densities[r] = util.linlin(0, 1000, 0, 10, raw_densities[r])
+end
+
 
 
 -- ------------------------------------------------------------------------
