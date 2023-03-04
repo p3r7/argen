@@ -1,7 +1,17 @@
 -- argen.
 -- @eigen
 --
--- port of arc rythm generator by @stretta
+--   arc
+--         rythm
+--                 generator
+--
+-- ▼ instructions below ▼
+--
+-- arc        - density
+-- K1 + arc   - randomize
+-- K2 + arc   - offset
+--
+-- original idea by @stretta
 
 
 
