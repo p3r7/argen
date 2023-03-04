@@ -6,11 +6,16 @@
 
 
 -- ------------------------------------------------------------------------
+-- deps
+
+local lattice = require("lattice")
+local MusicUtil = require "musicutil"
+
+-- ------------------------------------------------------------------------
 -- engine
 
 engine.name = "Timber"
 local Timber = include("timber/lib/timber_engine")
-local MusicUtil = require "musicutil"
 
 
 -- ------------------------------------------------------------------------
@@ -25,12 +30,14 @@ local arc_fps = 15
 
 local a
 
-patterns = {}
-sparse_patterns = {}
-pattern_shifts = {}
+local s_lattice
 
-raw_densities = {}
-densities = {}
+local patterns = {}
+local sparse_patterns = {}
+local pattern_shifts = {}
+
+local raw_densities = {}
+local densities = {}
 
 
 -- ------------------------------------------------------------------------
@@ -111,6 +118,8 @@ function init()
   screen.aa(1)
   screen.line_width(1)
 
+  s_lattice = lattice:new{}
+
   a = arc.connect(1)
   a.delta = arc_delta
 
@@ -153,14 +162,14 @@ function init()
         redraw()
       end
   end)
-  arc_redraw_clock = clock.run(
-    function()
-      local step_s = 1 / arc_fps
-      while true do
-        clock.sleep(step_s)
-        arc_redraw()
-      end
-  end)
+  -- arc_redraw_clock = clock.run(
+  --   function()
+  --     local step_s = 1 / arc_fps
+  --     while true do
+  --       clock.sleep(step_s)
+  --       arc_redraw()
+  --     end
+  -- end)
   arc_clock = clock.run(
     function()
       local step_s = 1 / 10
@@ -169,12 +178,20 @@ function init()
         arc_process()
       end
   end)
+
+  local sprocket = s_lattice:new_sprocket{
+    action = arc_redraw,
+    division = 1/32,
+    enabled = true
+  }
+  s_lattice:start()
 end
 
 function cleanup()
   clock.cancel(redraw_clock)
-  clock.cancel(arc_redraw_clock)
+  -- clock.cancel(arc_redraw_clock)
   clock.cancel(arc_clock)
+  s_lattice:destroy()
 end
 
 
@@ -271,8 +288,6 @@ function arc_redraw()
     -- a:led(r, 1, 15)
   end
 
-
-
   a:refresh()
 end
 
@@ -307,6 +322,10 @@ function key(n, v)
   end
 end
 
+function enc(n, d)
+  params:set("clock_tempo", params:get("clock_tempo") + d)
+  screen_dirty = true
+end
 
 arc_delta = function(r, d)
 
@@ -333,5 +352,9 @@ end
 
 function redraw()
   screen.clear()
+
+  screen.move(1, 8)
+  screen.text(params:get("clock_tempo") .. " BPM")
+
   screen.update()
 end
