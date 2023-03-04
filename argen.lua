@@ -25,8 +25,8 @@ local arc_fps = 15
 
 local a
 
-local patterns = {}
-local sparse_patterns = {}
+patterns = {}
+sparse_patterns = {}
 
 raw_densities = {}
 densities = {}
@@ -69,10 +69,14 @@ function gen_pattern(pattern)
 
     local v = 0
 
-    if i%4 == 0 then
+    if i%(64/4) == 0 then
       v = 1
+    elseif i%(64/16) == 0 then
+      v = 2
+    elseif i%(64/32) == 0 then
+      v = 4
     else
-      v = math.random(2) - 1
+      v = math.random(11) - 1
     end
 
     pattern[i] = v
@@ -281,7 +285,7 @@ end
 function arc_process ()
   for r=1,4 do
     for i=1,64 do
-      if patterns[r][i] == 1 and matches_density(i, densities[r]) then
+      if patterns[r][i] > 1 and patterns[r][i] > (10 - densities[r]) then
       -- if patterns[r][i] == 1  then
         sparse_patterns[r][i] = 1
       else
