@@ -5,8 +5,9 @@
 --         rythm
 --                 generator
 --
--- ▼ instructions below ▼
+--    ▼ instructions below ▼
 --
+-- E1         - clock speed
 -- arc        - density
 -- K1 + arc   - randomize
 -- K2 + arc   - offset
@@ -154,7 +155,6 @@ function init()
 
   Timber.options.PLAY_MODE_BUFFER_DEFAULT = 4
   Timber.options.PLAY_MODE_STREAMING_DEFAULT = 3
-  params:add_separator()
   Timber.add_params()
   for i = 1, 4 do
     local extra_params = {
@@ -162,7 +162,7 @@ function init()
          Timber.setup_params_dirty = true
       end},
     }
-    params:add_separator()
+    -- params:add_separator()
     Timber.add_sample_params(i, true, extra_params)
     params:set('play_mode_' .. i, 3) -- "1-Shot" in options.PLAY_MODE_BUFFER
     --params:set('amp_env_sustain_' .. i, 0)
