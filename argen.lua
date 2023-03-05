@@ -34,6 +34,8 @@
 -- K3 + E2/E3 - offset
 -- K1 + E1    - clock speed
 -- K1 + K2    - randomize all
+-- K1 + E2    - transpose sample
+-- K1 + E3    - filter freq
 --
 -- original idea by @stretta
 
@@ -65,8 +67,6 @@ end
 
 -- ------------------------------------------------------------------------
 -- conf
-
-local QUIET = true
 
 local FPS = 15
 local ARC_FPS = 15
@@ -228,7 +228,12 @@ function init()
     has_arc = true
   end
 
+  local OUT_VOICE_MODES = {"sample", "nb"}
+  local ON_OFF = {"on", "off"}
+
   nb:init()
+
+  params:add_option("flash", "Animation Flash ", ON_OFF)
 
   params:add_trigger("gen_all", "Randomize")
   params:set_action("gen_all",
@@ -247,9 +252,6 @@ function init()
                         params:set("ring_pattern_shift_"..r, 0)
                       end
   end)
-
-  local OUT_VOICE_MODES = {"sample", "nb"}
-  local ON_OFF = {"on", "off"}
 
   for r=1,ARCS do
     patterns[r] = gen_pattern()
@@ -675,11 +677,7 @@ function enc(n, d)
   if n == 3 then
     if not has_arc then
       if k1 then
-        if k2 then
-          params:set("filter_resonance", params:get("filter_resonance") + d/20)
-        else
           params:set("filter_freq", params:get("filter_freq") + d * 50)
-        end
       else
         local has_effect = enc_no_arc(cursor_pos+1, d)
         if has_effect then
@@ -781,7 +779,7 @@ function redraw()
 
     screen.move(x + radius2, y)
     screen.circle(x, y, radius2)
-    if is_firing[r] and not QUIET then
+    if is_firing[r] and params:string("flash") == "on" then
       screen.fill()
     else
       screen.stroke()
@@ -793,9 +791,11 @@ function redraw()
 
     if not has_arc then
       if r >= cursor_pos and r < cursor_pos + CURSOR_LEN  then
+        screen.level(5)
         screen.move(x - radius2 - 3, y + radius2 + 5)
         screen.line(x + radius2 + 3, y + radius2 + 5)
         screen.stroke()
+        screen.level(15)
       end
     end
 
