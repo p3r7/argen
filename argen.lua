@@ -23,10 +23,12 @@
 -- ------------------------------------------------------------------------
 -- deps
 
-local lattice = require("lattice")
+local lattice = require "lattice"
 local MusicUtil = require "musicutil"
 local ControlSpec = require "controlspec"
 local Formatters = require "formatters"
+
+local nb = include("argen/lib/nb/lib/nb")
 
 
 -- ------------------------------------------------------------------------
@@ -167,6 +169,8 @@ function init()
   a = arc.connect(1)
   a.delta = arc_delta
 
+  nb:init()
+
   params:add_trigger("gen_all", "Randomize")
   params:set_action("gen_all",
                     function(v)
@@ -185,6 +189,7 @@ function init()
                       end
   end)
 
+  local OUT_VOICE_MODES = {"sample", "nb"}
 
   for r=1,4 do
     patterns[r] = gen_pattern()
@@ -198,14 +203,43 @@ function init()
     params:set_action("ring_gen_pattern_"..r,
                       function(v)
                       gen_ring_pattern(r)
-  end)
-
+    end)
 
     params:add{type = "number", id = "ring_density_"..r, name = "Density "..r, min = 0, max = DENSITY_MAX, default = 0}
     params:add{type = "number", id = "ring_pattern_shift_"..r, name = "Pattern Shift "..r, min = -(ARC_SEGMENTS-1), max = (ARC_SEGMENTS-1), default = 0}
 
+    -- params:add_option("ring_quantize_"..r, "Quantize "..r, {"on", "off"})
 
+    params:add_option("ring_out_mode_"..r, "Out Mode "..r, OUT_VOICE_MODES)
+    params:set_action("ring_out_mode_"..r,
+                      function(v)
+                        if OUT_VOICE_MODES[v] == "nb" then
+                          params:show("ring_out_nb_voice_"..r)
+                          params:show("ring_out_nb_note_"..r)
+                          params:show("ring_out_nb_vel_"..r)
+                          params:show("ring_out_nb_dur_"..r)
+                        else
+                          params:hide("ring_out_nb_voice_"..r)
+                          params:hide("ring_out_nb_note_"..r)
+                          params:hide("ring_out_nb_vel_"..r)
+                          params:hide("ring_out_nb_dur_"..r)
+                        end
+                        _menu.rebuild_params()
+                      end
+    )
+    nb:add_param("ring_out_nb_voice_"..r, "nb Voice "..r)
+    params:add{type = "number", id = "ring_out_nb_note_"..r, name = "nb Note "..r, min = 0, max = 127, default = 60}
+    params:add{type = "control", id = "ring_out_nb_vel_"..r, name = "nb Velocity "..r, controlspec = ControlSpec.new(0, 1, "lin", 0, 1, "")}
+    params:add{type = "control", id = "ring_out_nb_dur_"..r, name = "nb Dur "..r, controlspec = ControlSpec.new(0, 1, "lin", 0, 0.2, "")}
+
+    params:hide("ring_out_nb_voice_"..r)
+    params:hide("ring_out_nb_note_"..r)
+    params:hide("ring_out_nb_vel_"..r)
+    params:hide("ring_out_nb_dur_"..r)
   end
+
+
+  nb:add_player_params()
 
   params:add{type = "control", id = "filter_freq", name = "Filter Cutoff", controlspec = ControlSpec.new(60, 20000, "exp", 0, 3000, "Hz"), formatter = Formatters.format_freq, action = function(v)
                for i = 1, 4 do
@@ -306,6 +340,22 @@ end
 
 
 -- ------------------------------------------------------------------------
+-- note trigger
+
+function note_trigger(r)
+  if params:string("ring_out_mode_"..r) == "sample" then
+    timber_play(r)
+  elseif params:string("ring_out_mode_"..r) == "nb" then
+    local player = params:lookup_param("ring_out_nb_voice_"..r):get_player()
+    local note = params:get("ring_out_nb_note_"..r)
+    local vel = params:get("ring_out_nb_vel_"..r)
+    local dur = params:get("ring_out_nb_dur_"..r)
+    player:play_note(note, vel, dur)
+  end
+end
+
+
+-- ------------------------------------------------------------------------
 -- arc
 
 local pos = 1
@@ -332,7 +382,7 @@ function arc_redraw()
         if radial_pos % ARC_SEGMENTS == 1 then
           l = 15
           is_firing[r] = true
-          timber_play(r)
+          note_trigger(r)
         else
           l = 3
         end
