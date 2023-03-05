@@ -14,6 +14,10 @@
 -- K3 + E3    - filter req
 -- arc        - density
 -- K1 + arc   - randomize
+-- K2 + arc   - quantize off
+--              & speed
+-- K2 + K3
+--    + arc   - quantize on
 -- K3 + arc   - offset
 --
 -- original idea by @stretta
@@ -47,13 +51,26 @@ end
 -- ------------------------------------------------------------------------
 -- conf
 
-local fps = 15
-local arc_fps = 15
+local FPS = 15
+local ARC_FPS = 15
+local ARC_REFRESH_SAMPLES = 10
+local UNQUANTIZED_SAMPLES = 128
 
+local SCREEN_H = 64
+local SCREEN_W = 128
+
+local MAX_ARCS = 16
+
+local INIT_POS = 1
+
+-- local ARCS = 8
+local ARCS = 4
 local ARC_SEGMENTS = 64
 
 local DENSITY_MAX = 10
 local ARC_RAW_DENSITY_RESOLUTION = 1000
+
+local MAX_BPM = 2000
 
 
 -- ------------------------------------------------------------------------
@@ -65,8 +82,11 @@ local s_lattice
 
 local patterns = {}
 local sparse_patterns = {}
--- local pattern_shifts = {}
 
+pos_quant = INIT_POS
+unquantized_rot_pos = {}
+
+-- NB: hisher resolution ring density values when setting via arc
 local raw_densities = {}
 
 local is_firing = {}
@@ -96,6 +116,10 @@ local function srand(x)
   math.randomseed(x)
 end
 
+function round(v)
+  return math.floor(v+0.5)
+end
+
 local function cos(x)
   return math.cos(math.rad(x * 360))
 end
@@ -104,6 +128,13 @@ local function sin(x)
   return -math.sin(math.rad(x * 360))
 end
 
+function bpm_to_fps(v)
+  return v / 60
+end
+
+function fps_to_bpm(v)
+  return v * 60
+end
 
 -- ------------------------------------------------------------------------
 -- patterns
@@ -156,7 +187,8 @@ end
 
 local redraw_clock
 local arc_redraw_clock
-local arc_clock
+local arc_segment_refresh_clock
+local arc_unquantized_clock
 
 local arc_delta
 
@@ -175,7 +207,7 @@ function init()
   params:set_action("gen_all",
                     function(v)
                       srand(os.time())
-                      for r=1,4 do
+                      for r=1,ARCS do
                         params:set("ring_gen_pattern_"..r, 1)
                         local density = DENSITY_MAX
                         for try=1,math.floor(DENSITY_MAX/2) do
@@ -190,14 +222,17 @@ function init()
   end)
 
   local OUT_VOICE_MODES = {"sample", "nb"}
+  local ON_OFF = {"on", "off"}
 
-  for r=1,4 do
+  for r=1,ARCS do
     patterns[r] = gen_pattern()
     sparse_patterns[r] = gen_empty_pattern()
     raw_densities[r] = 0
-    -- pattern_shifts[r] = 0
     prev_pattern_refresh_t[r] = 0
+    unquantized_rot_pos[r] = INIT_POS
     is_firing[r] = false
+
+    params:add_group("Ring " .. r, 10)
 
     params:add_trigger("ring_gen_pattern_"..r, "Generate "..r)
     params:set_action("ring_gen_pattern_"..r,
@@ -206,9 +241,29 @@ function init()
     end)
 
     params:add{type = "number", id = "ring_density_"..r, name = "Density "..r, min = 0, max = DENSITY_MAX, default = 0}
+    params:set_action("ring_density_"..r,
+                      function(v)
+                        -- NB: reset arc raw density counter
+                        raw_densities[r] = math.floor(util.linlin(0, DENSITY_MAX, 0, ARC_RAW_DENSITY_RESOLUTION, v))
+                      end
+    )
     params:add{type = "number", id = "ring_pattern_shift_"..r, name = "Pattern Shift "..r, min = -(ARC_SEGMENTS-1), max = (ARC_SEGMENTS-1), default = 0}
 
-    -- params:add_option("ring_quantize_"..r, "Quantize "..r, {"on", "off"})
+    params:add_option("ring_quantize_"..r, "Quantize "..r, ON_OFF)
+    params:set_action("ring_quantize_"..r,
+                      function(v)
+                        if ON_OFF[v] == "on" then
+                          params:hide("ring_bpm_"..r)
+                        else
+                          unquantized_rot_pos[r] = pos_quant
+                          params:set("ring_bpm_"..r, params:get("clock_tempo"))
+                          params:show("ring_bpm_"..r)
+                        end
+                        _menu.rebuild_params()
+                      end
+    )
+    params:add{type = "number", id = "ring_bpm_"..r, name = "BPM "..r, min = -MAX_BPM, max = MAX_BPM, default = 20}
+    params:hide("ring_bpm_"..r)
 
     params:add_option("ring_out_mode_"..r, "Out Mode "..r, OUT_VOICE_MODES)
     params:set_action("ring_out_mode_"..r,
@@ -229,7 +284,7 @@ function init()
     )
     nb:add_param("ring_out_nb_voice_"..r, "nb Voice "..r)
     params:add{type = "number", id = "ring_out_nb_note_"..r, name = "nb Note "..r, min = 0, max = 127, default = 60}
-    params:add{type = "control", id = "ring_out_nb_vel_"..r, name = "nb Velocity "..r, controlspec = ControlSpec.new(0, 1, "lin", 0, 1, "")}
+    params:add{type = "control", id = "ring_out_nb_vel_"..r, name = "nb Velocity "..r, controlspec = ControlSpec.new(0, 1, "lin", 0, 0.8, "")}
     params:add{type = "control", id = "ring_out_nb_dur_"..r, name = "nb Dur "..r, controlspec = ControlSpec.new(0, 1, "lin", 0, 0.2, "")}
 
     params:hide("ring_out_nb_voice_"..r)
@@ -284,31 +339,39 @@ function init()
 
   redraw_clock = clock.run(
     function()
-      local step_s = 1 / fps
+      local step_s = 1 / FPS
       while true do
         clock.sleep(step_s)
         redraw()
       end
   end)
-  -- arc_redraw_clock = clock.run(
-  --   function()
-  --     local step_s = 1 / arc_fps
-  --     while true do
-  --       clock.sleep(step_s)
-  --       arc_redraw()
-  --     end
-  -- end)
-  arc_clock = clock.run(
+  arc_redraw_clock = clock.run(
     function()
-      local step_s = 1 / 10
+      local step_s = 1 / ARC_FPS
       while true do
         clock.sleep(step_s)
-        arc_process()
+        arc_redraw()
+      end
+  end)
+  arc_segment_refresh_clock = clock.run(
+    function()
+      local step_s = 1 / ARC_REFRESH_SAMPLES
+      while true do
+        clock.sleep(step_s)
+        arc_segment_refresh()
+      end
+  end)
+  arc_unquantized_clock = clock.run(
+    function()
+      local step_s = 1 / UNQUANTIZED_SAMPLES
+      while true do
+        clock.sleep(step_s)
+        arc_unquantized_trigger()
       end
   end)
 
   local sprocket = s_lattice:new_sprocket{
-    action = arc_redraw,
+    action = arc_quantized_trigger,
     division = 1/32,
     enabled = true
   }
@@ -317,8 +380,9 @@ end
 
 function cleanup()
   clock.cancel(redraw_clock)
-  -- clock.cancel(arc_redraw_clock)
-  clock.cancel(arc_clock)
+  clock.cancel(arc_redraw_clock)
+  clock.cancel(arc_segment_refresh_clock)
+  clock.cancel(arc_unquantized_clock)
   s_lattice:destroy()
 end
 
@@ -358,46 +422,112 @@ end
 -- ------------------------------------------------------------------------
 -- arc
 
-local pos = 1
+function arc_quantized_trigger()
+
+  pos_quant = pos_quant + 1
+  if pos_quant > ARC_SEGMENTS then
+      pos_quant = pos_quant % ARC_SEGMENTS
+  end
+
+  for r=1,ARCS do
+    if params:string("ring_quantize_"..r) == "on" then
+      is_firing[r] = false
+      for i, v in ipairs(sparse_patterns[r]) do
+        local radial_pos = (i + pos_quant) + params:get("ring_pattern_shift_"..r)
+        while radial_pos < 0 do
+          radial_pos = radial_pos + ARC_SEGMENTS
+        end
+
+        if v == 1 then
+          if radial_pos % ARC_SEGMENTS == 1 then
+            is_firing[r] = true
+            note_trigger(r)
+          end
+        end
+      end
+    end
+  end
+end
+
+function arc_unquantized_trigger()
+  for r=1,ARCS do
+    if params:string("ring_quantize_"..r) == "off" then
+      local is_already_firing = is_firing[r]
+      is_firing[r] = false
+      local bpm = params:get("ring_bpm_"..r)
+      local step = bpm / UNQUANTIZED_SAMPLES
+      step = step / 8
+      unquantized_rot_pos[r] = unquantized_rot_pos[r] + step
+
+      for i, v in ipairs(sparse_patterns[r]) do
+        local radial_pos = (i + round(unquantized_rot_pos[r])) + params:get("ring_pattern_shift_"..r)
+        while radial_pos < 0 do
+          radial_pos = radial_pos + ARC_SEGMENTS
+        end
+        -- radial_pos = round(radial_pos)
+
+        if v == 1 then
+          if radial_pos % ARC_SEGMENTS == 1 then
+            is_firing[r] = true
+            if not is_already_firing then
+              note_trigger(r)
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+-- local pos = 1
 
 function arc_redraw()
   a:all(0)
 
-  pos = (pos + 1)
-  if pos > ARC_SEGMENTS then
-    pos = pos % ARC_SEGMENTS
-  end
+  for r=1,ARCS do
 
-  for r=1,4 do
-    is_firing[r] = false
+    local display_pos = 1
+
+    if params:string("ring_quantize_"..r) == "on" then
+      display_pos = pos_quant
+
+      -- NB: this kinda works but is imprecise
+      -- local step = (params:get("clock_tempo") * 2) / fps_to_bpm(ARC_FPS)
+    else
+      -- TODO: redo this
+      -- local bpm_ratio = params:get("ring_bpm_"..r) / fps_to_bpm(ARC_FPS)
+      -- local step = bpm_ratio
+      -- local display_pos = pos_quant + step
+      -- if display_pos > ARC_SEGMENTS then
+      --   display_pos = display_pos % ARC_SEGMENTS
+      -- end
+
+      display_pos = round(unquantized_rot_pos[r])
+    end
+
     for i, v in ipairs(sparse_patterns[r]) do
-      local radial_pos = (i + pos) + params:get("ring_pattern_shift_"..r)
+      local radial_pos = (i + display_pos) + params:get("ring_pattern_shift_"..r)
       while radial_pos < 0 do
         radial_pos = radial_pos + ARC_SEGMENTS
       end
 
-    -- for i, v in ipairs(patterns[r]) do
       local l = 0
       if v == 1 then
-        if radial_pos % ARC_SEGMENTS == 1 then
-          l = 15
-          is_firing[r] = true
-          note_trigger(r)
-        else
-          l = 3
-        end
-        a:led(r, radial_pos, l)
+        a:led(r, radial_pos, 3)
       end
     end
 
-    -- a:led(r, 1, 15)
+    if is_firing[r] then
+      a:led(r, 1, 15)
+    end
+
   end
 
   a:refresh()
 end
 
-function arc_process ()
-  for r=1,4 do
+function arc_segment_refresh()
+  for r=1,ARCS do
     for i=1,ARC_SEGMENTS do
       if patterns[r][i] > 1 and patterns[r][i] > (DENSITY_MAX - params:get("ring_density_"..r)) then
       -- if patterns[r][i] == 1  then
@@ -417,8 +547,24 @@ local k1 = false
 local k2 = false
 local k3 = false
 
+local k2_k3 = false
+local k3_k2 = false
+
 function key(n, v)
 
+  -- combo of modifiers
+  if n == 2 then
+    if k3 then
+      k3_k2 = (v == 1)
+    end
+  end
+  if n == 3 then
+    if k2 then
+      k2_k3 = (v == 1)
+    end
+  end
+
+  -- single modifiers
   if n == 1 then
     k1 = (v == 1)
   end
@@ -467,6 +613,17 @@ arc_delta = function(r, d)
     return
   end
 
+  if k2_k3 then
+    params:set("ring_quantize_"..r, 1) -- on
+    return
+  end
+
+  if k2 then
+    params:set("ring_quantize_"..r, 2) -- off
+    params:set("ring_bpm_"..r, math.floor(params:get("ring_bpm_"..r) + d))
+    return
+  end
+
   if k3 then
     -- pattern_shifts[r] = math.floor(pattern_shifts[r] + d/5) % 64
     params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + d/5) % ARC_SEGMENTS)
@@ -498,10 +655,31 @@ function redraw()
   screen.text("Q: "..params:get("filter_resonance"))
 
   local radius = 11
-  for r=1,4 do
+  local MAX_ARCS_PER_LINE = 8
+  for r=1,ARCS do
 
-    local x = 128/4 * r - 2 * 3/4 * radius
-    local y = 2*64/3
+    local r2 = r
+    while r2 > MAX_ARCS_PER_LINE do
+      r2 = r2 - MAX_ARCS_PER_LINE
+    end
+
+    local y_ratio = 2/3
+    if ARCS > MAX_ARCS_PER_LINE then
+      if r <= MAX_ARCS_PER_LINE then
+        y_ratio = 1/2
+      else
+        y_ratio = 3/4
+      end
+    end
+    local y = y_ratio * SCREEN_H
+
+    local nb_arcs_in_col = ARCS
+    while r > MAX_ARCS_PER_LINE and nb_arcs_in_col > MAX_ARCS_PER_LINE do
+      nb_arcs_in_col = nb_arcs_in_col - MAX_ARCS_PER_LINE
+    end
+    nb_arcs_in_col = math.min(nb_arcs_in_col, MAX_ARCS_PER_LINE)
+
+    local x = SCREEN_W/nb_arcs_in_col * r2 - 2 * 3/nb_arcs_in_col * radius
 
     local radius2 = radius
     if os.time() - prev_pattern_refresh_t[r] < 1 then
@@ -516,9 +694,32 @@ function redraw()
       screen.stroke()
     end
 
-    for i=1,64 do
+    if params:string("ring_quantize_"..r) == "off" then
+      screen.pixel(x, y)
+    end
+
+    for i=1,ARC_SEGMENTS do
+
+      if params:string("ring_quantize_"..r) == "on" then
+        display_pos = pos_quant
+
+        -- NB: this kinda works but is imprecise
+        -- local step = (params:get("clock_tempo") * 2) / fps_to_bpm(FPS)
+      else
+        -- TODO: redo this
+        -- local bpm_ratio = params:get("ring_bpm_"..r) / fps_to_bpm(FPS)
+        -- local step = bpm_ratio
+        -- local display_pos = pos_quant + step
+        -- if display_pos > ARC_SEGMENTS then
+        --   display_pos = display_pos % ARC_SEGMENTS
+        -- end
+
+        display_pos = round(unquantized_rot_pos[r])
+
+      end
+
       if sparse_patterns[r][i] == 1 then
-      local radial_pos = (i + pos) + params:get("ring_pattern_shift_"..r) + (ARC_SEGMENTS/4)
+      local radial_pos = (i + display_pos) + params:get("ring_pattern_shift_"..r) + (ARC_SEGMENTS/4)
       while radial_pos < 0 do
         radial_pos = radial_pos + ARC_SEGMENTS
       end
