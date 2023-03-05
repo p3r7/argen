@@ -144,6 +144,10 @@ function gen_empty_pattern(pattern)
   return pattern
 end
 
+function gen_ring_pattern(r)
+  gen_pattern(patterns[r])
+  prev_pattern_refresh_t[r] = os.time()
+end
 
 -- ------------------------------------------------------------------------
 -- script lifecycle
@@ -193,7 +197,7 @@ function init()
     params:add_trigger("ring_gen_pattern_"..r, "Generate "..r)
     params:set_action("ring_gen_pattern_"..r,
                       function(v)
-                      gen_pattern(patterns[r])
+                      gen_ring_pattern(r)
   end)
 
 
@@ -407,10 +411,8 @@ end
 
 arc_delta = function(r, d)
   if k1 then
-    local now = os.time()
-    if now - prev_pattern_refresh_t[r] > 1 then
-      gen_pattern(patterns[r])
-      prev_pattern_refresh_t[r] = now
+    if os.time() - prev_pattern_refresh_t[r] > 1 then
+      gen_ring_pattern(r)
     end
     return
   end
