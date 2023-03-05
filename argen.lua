@@ -577,6 +577,11 @@ function key(n, v)
     k3 = (v == 1)
   end
 
+  if not k2 or not k3 then
+    k2_k3 = false
+    k3_k2 = false
+  end
+
   if k1 and k3 then
     params:set("gen_all", 1)
   end
