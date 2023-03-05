@@ -7,18 +7,33 @@
 --
 --    ▼ instructions below ▼
 --
--- K1 + K2    - randomize
--- E1         - clock speed
--- E2         - transpose
--- E3         - filter freq
--- K3 + E3    - filter req
+--   when arc detected:
 -- arc        - density
--- K1 + arc   - randomize
 -- K2 + arc   - quantize off
---              & speed
+--              & speed control
 -- K2 + K3
 --    + arc   - quantize on
 -- K3 + arc   - offset
+-- K1 + arc   - randomize ring
+-- K1 + K2    - randomize all
+-- E1         - clock speed
+-- E2         - transpose sample
+-- E3         - filter freq
+-- K3 + E3    - filter res
+--
+--   when no arc detected, a
+-- cursor appears & allows
+-- selecting 2 rings at a time,
+-- w/ E2 / E3 acting as arc:
+-- E1         - select rings
+-- E2/E3      - density
+-- K2 + E2/E3 - quantize off
+--              & speed control
+-- K2 + K3
+--    + E2/E3 - quantize on
+-- K3 + E2/E3 - offset
+-- K1 + E1    - clock speed
+-- K1 + K2    - randomize all
 --
 -- original idea by @stretta
 
@@ -51,6 +66,8 @@ end
 -- ------------------------------------------------------------------------
 -- conf
 
+local QUIET = true
+
 local FPS = 15
 local ARC_FPS = 15
 local ARC_REFRESH_SAMPLES = 10
@@ -76,7 +93,11 @@ local MAX_BPM = 2000
 -- ------------------------------------------------------------------------
 -- state
 
-local a
+local a = nil
+
+local has_arc = false
+local CURSOR_LEN = 2
+local cursor_pos = 1
 
 local s_lattice
 
@@ -92,6 +113,7 @@ local raw_densities = {}
 local is_firing = {}
 
 local prev_pattern_refresh_t = {}
+
 
 
 -- ------------------------------------------------------------------------
@@ -182,6 +204,7 @@ function gen_ring_pattern(r)
   prev_pattern_refresh_t[r] = os.time()
 end
 
+
 -- ------------------------------------------------------------------------
 -- script lifecycle
 
@@ -199,7 +222,11 @@ function init()
   s_lattice = lattice:new{}
 
   a = arc.connect(1)
-  a.delta = arc_delta
+
+  if a.name ~= "none" and a.device ~= nil then
+    a.delta = arc_delta
+    has_arc = true
+  end
 
   nb:init()
 
@@ -588,18 +615,79 @@ function key(n, v)
 
 end
 
+function enc_no_arc(r, d)
+  if k2_k3 then
+    params:set("ring_quantize_"..r, 1) -- on
+    return true
+  end
+
+  if k2 then
+    params:set("ring_quantize_"..r, 2) -- off
+    params:set("ring_bpm_"..r, math.floor(params:get("ring_bpm_"..r) + d * 5))
+    return true
+  end
+
+  if k3 then
+    -- pattern_shifts[r] = math.floor(pattern_shifts[r] + d/5) % 64
+    params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + d) % ARC_SEGMENTS)
+    return true
+  end
+
+  local sign = math.floor(d/math.abs(d))
+    -- raw_densities[r] = util.clamp(raw_densities[r] + d * 5, 0, ARC_RAW_DENSITY_RESOLUTION)
+    -- params:set("ring_density_"..r, math.floor(util.linlin(0, ARC_RAW_DENSITY_RESOLUTION, 0, DENSITY_MAX, raw_densities[r])))
+  params:set("ring_density_"..r, params:get("ring_density_"..r) + sign)
+  return true
+
+end
+
 function enc(n, d)
   if n == 1 then
-    params:set("clock_tempo", params:get("clock_tempo") + d)
+    if not has_arc then
+      if k1 then
+        params:set("clock_tempo", params:get("clock_tempo") + d)
+      else
+        local sign = math.floor(d/math.abs(d))
+        cursor_pos = util.clamp(cursor_pos + sign, 1, ARCS - CURSOR_LEN + 1)
+      end
+    else
+      params:set("clock_tempo", params:get("clock_tempo") + d)
+    end
     return
   end
 
   if n == 2 then
-    params:set("transpose", params:get("transpose") + d)
+    if not has_arc then
+      if k1 then
+        params:set("transpose", params:get("transpose") + d)
+      else
+        local has_effect = enc_no_arc(cursor_pos, d)
+        if has_effect then
+          return
+        end
+      end
+    else
+      params:set("transpose", params:get("transpose") + d)
+    end
     return
   end
 
   if n == 3 then
+    if not has_arc then
+      if k1 then
+        if k2 then
+          params:set("filter_resonance", params:get("filter_resonance") + d/20)
+        else
+          params:set("filter_freq", params:get("filter_freq") + d * 50)
+        end
+      else
+        local has_effect = enc_no_arc(cursor_pos+1, d)
+        if has_effect then
+          return
+        end
+      end
+    end
+
     if k2 then
       params:set("filter_resonance", params:get("filter_resonance") + d/20)
     else
@@ -693,7 +781,7 @@ function redraw()
 
     screen.move(x + radius2, y)
     screen.circle(x, y, radius2)
-    if is_firing[r] then
+    if is_firing[r] and not QUIET then
       screen.fill()
     else
       screen.stroke()
@@ -701,6 +789,14 @@ function redraw()
 
     if params:string("ring_quantize_"..r) == "off" then
       screen.pixel(x, y)
+    end
+
+    if not has_arc then
+      if r >= cursor_pos and r < cursor_pos + CURSOR_LEN  then
+        screen.move(x - radius2 - 3, y + radius2 + 5)
+        screen.line(x + radius2 + 3, y + radius2 + 5)
+        screen.stroke()
+      end
     end
 
     for i=1,ARC_SEGMENTS do
