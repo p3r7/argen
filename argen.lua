@@ -7,6 +7,7 @@
 --
 --    ▼ instructions below ▼
 --
+-- K1 + K2    - randomize
 -- E1         - clock speed
 -- E2         - transpose
 -- E3         - filter freq
@@ -47,6 +48,11 @@ end
 local fps = 15
 local arc_fps = 15
 
+local ARC_SEGMENTS = 64
+
+local DENSITY_MAX = 10
+local ARC_RAW_DENSITY_RESOLUTION = 1000
+
 
 -- ------------------------------------------------------------------------
 -- state
@@ -57,10 +63,9 @@ local s_lattice
 
 local patterns = {}
 local sparse_patterns = {}
-local pattern_shifts = {}
+-- local pattern_shifts = {}
 
 local raw_densities = {}
-local densities = {}
 
 local is_firing = {}
 
@@ -108,18 +113,18 @@ function gen_pattern(pattern)
 
   srand(math.random(10000))
 
-  for i=1,64 do
+  for i=1,ARC_SEGMENTS do
 
     local v = 0
 
-    if i%(64/4) == 0 then
+    if i%(ARC_SEGMENTS/4) == 0 then
       v = 1
-    elseif i%(64/16) == 0 then
+    elseif i%(ARC_SEGMENTS/16) == 0 then
       v = 2
-    elseif i%(64/32) == 0 then
+    elseif i%(ARC_SEGMENTS/32) == 0 then
       v = 4
     else
-      v = math.random(11) - 1
+      v = math.random(DENSITY_MAX + 1) - 1
     end
 
     pattern[i] = v
@@ -158,14 +163,44 @@ function init()
   a = arc.connect(1)
   a.delta = arc_delta
 
+  params:add_trigger("gen_all", "Randomize")
+  params:set_action("gen_all",
+                    function(v)
+                      srand(os.time())
+                      for r=1,4 do
+                        params:set("ring_gen_pattern_"..r, 1)
+                        local density = DENSITY_MAX
+                        for try=1,math.floor(DENSITY_MAX/2) do
+                          local d = math.random(DENSITY_MAX)
+                          if d < density then
+                            density = d
+                          end
+                        end
+                        params:set("ring_density_"..r, density)
+                        params:set("ring_pattern_shift_"..r, 0)
+                      end
+  end)
+
+
   for r=1,4 do
     patterns[r] = gen_pattern()
     sparse_patterns[r] = gen_empty_pattern()
     raw_densities[r] = 0
-    densities[r] = 0
-    pattern_shifts[r] = 0
+    -- pattern_shifts[r] = 0
     prev_pattern_refresh_t[r] = 0
     is_firing[r] = false
+
+    params:add_trigger("ring_gen_pattern_"..r, "Generate "..r)
+    params:set_action("ring_gen_pattern_"..r,
+                      function(v)
+                      gen_pattern(patterns[r])
+  end)
+
+
+    params:add{type = "number", id = "ring_density_"..r, name = "Density "..r, min = 0, max = DENSITY_MAX, default = 0}
+    params:add{type = "number", id = "ring_pattern_shift_"..r, name = "Pattern Shift "..r, min = -(ARC_SEGMENTS-1), max = (ARC_SEGMENTS-1), default = 0}
+
+
   end
 
   params:add{type = "control", id = "filter_freq", name = "Filter Cutoff", controlspec = ControlSpec.new(60, 20000, "exp", 0, 3000, "Hz"), formatter = Formatters.format_freq, action = function(v)
@@ -174,7 +209,7 @@ function init()
                end
   end}
 
-  params:add{type = "control", id = "filter_resonance", name = "Filter Resonance", controlspec = ControlSpec.new(0, 1, "lin", 0, 0, ""), action = function(v)
+  params:add{type = "control", id = "filter_resonance", name = "Filter Resonance", controlspec = ControlSpec.new(0, 1, "lin", 0, 0.3, ""), action = function(v)
                for i = 1, 4 do
                  params:set('filter_resonance_'..i, v)
                end
@@ -275,22 +310,22 @@ function arc_redraw()
   a:all(0)
 
   pos = (pos + 1)
-  if pos > 64 then
-    pos = pos % 64
+  if pos > ARC_SEGMENTS then
+    pos = pos % ARC_SEGMENTS
   end
 
   for r=1,4 do
     is_firing[r] = false
     for i, v in ipairs(sparse_patterns[r]) do
-      local radial_pos = (i + pos) + pattern_shifts[r]
+      local radial_pos = (i + pos) + params:get("ring_pattern_shift_"..r)
       while radial_pos < 0 do
-        radial_pos = radial_pos + 64
+        radial_pos = radial_pos + ARC_SEGMENTS
       end
 
     -- for i, v in ipairs(patterns[r]) do
       local l = 0
       if v == 1 then
-        if radial_pos % 64 == 1 then
+        if radial_pos % ARC_SEGMENTS == 1 then
           l = 15
           is_firing[r] = true
           timber_play(r)
@@ -309,8 +344,8 @@ end
 
 function arc_process ()
   for r=1,4 do
-    for i=1,64 do
-      if patterns[r][i] > 1 and patterns[r][i] > (10 - densities[r]) then
+    for i=1,ARC_SEGMENTS do
+      if patterns[r][i] > 1 and patterns[r][i] > (DENSITY_MAX - params:get("ring_density_"..r)) then
       -- if patterns[r][i] == 1  then
         sparse_patterns[r][i] = 1
       else
@@ -329,13 +364,23 @@ local k2 = false
 local k3 = false
 
 function key(n, v)
+
   if n == 1 then
     k1 = (v == 1)
-  elseif n == 2 then
+  end
+
+  if n == 2 then
     k2 = (v == 1)
-  elseif n == 3 then
+  end
+
+  if n == 3 then
     k3 = (v == 1)
   end
+
+  if k1 and k3 then
+    params:set("gen_all", 1)
+  end
+
 end
 
 function enc(n, d)
@@ -371,12 +416,13 @@ arc_delta = function(r, d)
   end
 
   if k3 then
-    pattern_shifts[r] = math.floor(pattern_shifts[r] + d/5) % 64
+    -- pattern_shifts[r] = math.floor(pattern_shifts[r] + d/5) % 64
+    params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + d/5) % ARC_SEGMENTS)
     return
   end
 
-  raw_densities[r] = util.clamp(raw_densities[r] + d, 0, 1000)
-  densities[r] = util.linlin(0, 1000, 0, 10, raw_densities[r])
+  raw_densities[r] = util.clamp(raw_densities[r] + d, 0, ARC_RAW_DENSITY_RESOLUTION)
+  params:set("ring_density_"..r, math.floor(util.linlin(0, ARC_RAW_DENSITY_RESOLUTION, 0, DENSITY_MAX, raw_densities[r])))
 end
 
 
@@ -420,12 +466,12 @@ function redraw()
 
     for i=1,64 do
       if sparse_patterns[r][i] == 1 then
-      local radial_pos = (i + pos) + pattern_shifts[r] + 16
+      local radial_pos = (i + pos) + params:get("ring_pattern_shift_"..r) + (ARC_SEGMENTS/4)
       while radial_pos < 0 do
-        radial_pos = radial_pos + 64
+        radial_pos = radial_pos + ARC_SEGMENTS
       end
 
-        screen.pixel(x + (radius + 4) * cos(radial_pos/64) * -1, y + (radius + 4) * sin(radial_pos/64))
+        screen.pixel(x + (radius + 4) * cos(radial_pos/ARC_SEGMENTS) * -1, y + (radius + 4) * sin(radial_pos/ARC_SEGMENTS))
       end
     end
 
