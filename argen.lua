@@ -19,7 +19,7 @@
 -- E1         - clock speed
 -- E2         - transpose sample
 -- E3         - filter freq
--- K3 + E3    - filter res
+-- K2 + E3    - filter res
 --
 --   when no arc detected, a
 -- cursor appears & allows
