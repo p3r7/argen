@@ -2,7 +2,7 @@
 -- @eigen
 --
 --   arc
---         rythm
+--         rhythm
 --                 generator
 --
 --    ▼ instructions below ▼
@@ -70,6 +70,7 @@ end
 
 local FPS = 15
 local ARC_FPS = 15
+local GRID_FPS = 15
 local ARC_REFRESH_SAMPLES = 10
 local UNQUANTIZED_SAMPLES = 128
 
@@ -89,20 +90,25 @@ local ARC_RAW_DENSITY_RESOLUTION = 1000
 
 local MAX_BPM = 2000
 
+local FAST_FIRING_DELTA = 0.02
 
 -- ------------------------------------------------------------------------
 -- state
 
 local a = nil
+local g = nil
 
 local has_arc = false
-local CURSOR_LEN = 2
-local cursor_pos = 1
+local SCREEN_CURSOR_LEN = 2
+local screen_cursor = 1
+local grid_cursor = 1
+
+local has_grid = false
 
 local s_lattice
 
-local patterns = {}
-local sparse_patterns = {}
+patterns = {}
+sparse_patterns = {}
 
 pos_quant = INIT_POS
 unquantized_rot_pos = {}
@@ -111,9 +117,9 @@ unquantized_rot_pos = {}
 local raw_densities = {}
 
 local is_firing = {}
+local last_firing = {}
 
 local prev_pattern_refresh_t = {}
-
 
 
 -- ------------------------------------------------------------------------
@@ -157,6 +163,7 @@ end
 function fps_to_bpm(v)
   return v * 60
 end
+
 
 -- ------------------------------------------------------------------------
 -- patterns
@@ -209,6 +216,7 @@ end
 -- script lifecycle
 
 local redraw_clock
+local grid_redraw_clock
 local arc_redraw_clock
 local arc_segment_refresh_clock
 local arc_unquantized_clock
@@ -222,18 +230,21 @@ function init()
   s_lattice = lattice:new{}
 
   a = arc.connect(1)
-
   if a.name ~= "none" and a.device ~= nil then
     a.delta = arc_delta
     has_arc = true
   end
 
+  g = grid.connect(1)
+  g.key = grid_key
+
   local OUT_VOICE_MODES = {"sample", "nb"}
   local ON_OFF = {"on", "off"}
+  local OFF_ON = {"off", "on"}
 
   nb:init()
 
-  params:add_option("flash", "Animation Flash ", ON_OFF)
+  params:add_option("flash", "Animation Flash ", OFF_ON)
 
   params:add_trigger("gen_all", "Randomize")
   params:set_action("gen_all",
@@ -260,8 +271,9 @@ function init()
     prev_pattern_refresh_t[r] = 0
     unquantized_rot_pos[r] = INIT_POS
     is_firing[r] = false
+    last_firing[r] = 0.0
 
-    params:add_group("Ring " .. r, 10)
+    params:add_group("Ring " .. r, 11)
 
     params:add_trigger("ring_gen_pattern_"..r, "Generate "..r)
     params:set_action("ring_gen_pattern_"..r,
@@ -273,7 +285,9 @@ function init()
     params:set_action("ring_density_"..r,
                       function(v)
                         -- NB: reset arc raw density counter
-                        raw_densities[r] = math.floor(util.linlin(0, DENSITY_MAX, 0, ARC_RAW_DENSITY_RESOLUTION, v))
+                        if math.abs(util.linlin(0, ARC_RAW_DENSITY_RESOLUTION, 0, DENSITY_MAX, raw_densities[r]) - v) >= (1 * DENSITY_MAX / 10)  then
+                          raw_densities[r] = math.floor(util.linlin(0, DENSITY_MAX, 0, ARC_RAW_DENSITY_RESOLUTION, v))
+                        end
                       end
     )
     params:add{type = "number", id = "ring_pattern_shift_"..r, name = "Pattern Shift "..r, min = -(ARC_SEGMENTS-1), max = (ARC_SEGMENTS-1), default = 0}
@@ -374,6 +388,14 @@ function init()
         redraw()
       end
   end)
+  grid_redraw_clock = clock.run(
+    function()
+      local step_s = 1 / GRID_FPS
+      while true do
+        clock.sleep(step_s)
+        grid_redraw()
+      end
+  end)
   arc_redraw_clock = clock.run(
     function()
       local step_s = 1 / ARC_FPS
@@ -409,6 +431,7 @@ end
 
 function cleanup()
   clock.cancel(redraw_clock)
+  clock.cancel(grid_redraw_clock)
   clock.cancel(arc_redraw_clock)
   clock.cancel(arc_segment_refresh_clock)
   clock.cancel(arc_unquantized_clock)
@@ -451,6 +474,15 @@ end
 -- ------------------------------------------------------------------------
 -- arc
 
+function pos_2_radial_pos(pos, shift, i)
+  if i == nil then i = 1 end
+  local radial_pos = ((i + pos) + shift)
+  while radial_pos < 0 do
+    radial_pos = radial_pos + ARC_SEGMENTS
+  end
+  return radial_pos
+end
+
 function arc_quantized_trigger()
 
   pos_quant = pos_quant + 1
@@ -462,15 +494,17 @@ function arc_quantized_trigger()
     if params:string("ring_quantize_"..r) == "on" then
       is_firing[r] = false
       for i, v in ipairs(sparse_patterns[r]) do
-        local radial_pos = (i + pos_quant) + params:get("ring_pattern_shift_"..r)
-        while radial_pos < 0 do
-          radial_pos = radial_pos + ARC_SEGMENTS
-        end
+        -- local radial_pos = (i + pos_quant) + params:get("ring_pattern_shift_"..r)
+        -- while radial_pos < 0 do
+        --   radial_pos = radial_pos + ARC_SEGMENTS
+        -- end
+        local radial_pos = pos_2_radial_pos(pos_quant, params:get("ring_pattern_shift_"..r), i)
 
         if v == 1 then
           if radial_pos % ARC_SEGMENTS == 1 then
-            is_firing[r] = true
             note_trigger(r)
+            is_firing[r] = true
+            last_firing[r] = os.clock()
           end
         end
       end
@@ -486,7 +520,7 @@ function arc_unquantized_trigger()
       local bpm = params:get("ring_bpm_"..r)
       local step = bpm / UNQUANTIZED_SAMPLES
       step = step / 8
-      unquantized_rot_pos[r] = unquantized_rot_pos[r] + step
+      unquantized_rot_pos[r] = (unquantized_rot_pos[r] + step) % ARC_SEGMENTS
 
       for i, v in ipairs(sparse_patterns[r]) do
         local radial_pos = (i + round(unquantized_rot_pos[r])) + params:get("ring_pattern_shift_"..r)
@@ -500,6 +534,7 @@ function arc_unquantized_trigger()
             is_firing[r] = true
             if not is_already_firing then
               note_trigger(r)
+              last_firing[r] = os.clock()
             end
           end
         end
@@ -546,7 +581,7 @@ function arc_redraw()
       end
     end
 
-    if is_firing[r] then
+    if is_firing[r] or math.abs(os.clock() - last_firing[r]) < FAST_FIRING_DELTA then
       a:led(r, 1, 15)
     end
 
@@ -558,16 +593,85 @@ end
 function arc_segment_refresh()
   for r=1,ARCS do
     for i=1,ARC_SEGMENTS do
-      if patterns[r][i] > 1 and patterns[r][i] > (DENSITY_MAX - params:get("ring_density_"..r)) then
-      -- if patterns[r][i] == 1  then
-        sparse_patterns[r][i] = 1
-      else
+      if params:get("ring_density_"..r) == 0 then
         sparse_patterns[r][i] = 0
+      else
+        if patterns[r][i] > 1 and patterns[r][i] > (DENSITY_MAX - params:get("ring_density_"..r)) then
+          sparse_patterns[r][i] = 1
+        else
+          sparse_patterns[r][i] = 0
+        end
       end
     end
   end
 end
 
+
+-- ------------------------------------------------------------------------
+-- grid
+
+function grid_redraw()
+  g:all(0)
+
+  local r = grid_cursor
+
+  local pos
+  if params:string("ring_quantize_"..r) == "on"  then
+    pos = pos_quant
+  else
+    pos = round(unquantized_rot_pos[r])
+  end
+
+  for x=1, math.min(g.cols, 8) do
+    for y=1, g.rows do
+      local i_head = x + ((y-1) * 8)
+      local i = ARC_SEGMENTS - i_head
+      i = (i - params:get("ring_pattern_shift_"..r)) % 64
+      while i < 0 do
+        i = i + ARC_SEGMENTS
+      end
+
+      local v = sparse_patterns[r][i]
+      local led_v = 0
+      if v == 1 then
+        led_v = round(util.linlin(0, DENSITY_MAX, 1, 8, patterns[r][i]))
+      end
+
+      if pos == i_head then
+        if led_v > 1 then
+          led_v = 15
+        else
+          led_v = 5
+        end
+      end
+      g:led(x, y, led_v)
+    end
+  end
+  g:refresh()
+end
+
+function grid_key(x, y, z)
+  local r = grid_cursor
+
+  -- pattern edit
+  if z >= 1 then
+    if x <= math.min(g.cols, 8) then
+      local i = ARC_SEGMENTS - (x + ((y-1) * 8))
+      i = (i - params:get("ring_pattern_shift_"..r)) % 64
+
+      local v = sparse_patterns[r][i]
+      if v == 1 then
+        patterns[r][i] = 0
+      else
+        if params:get("ring_density_"..r) > 0 then
+          -- FIXME: buggy for ring_density_<r> set to max
+          patterns[r][i] = DENSITY_MAX + 1 - params:get("ring_density_"..r)
+        end
+      end
+    end
+  end
+
+end
 
 -- ------------------------------------------------------------------------
 -- controls
@@ -618,6 +722,8 @@ function key(n, v)
 end
 
 function enc_no_arc(r, d)
+  grid_cursor = r
+
   if k2_k3 then
     params:set("ring_quantize_"..r, 1) -- on
     return true
@@ -630,14 +736,11 @@ function enc_no_arc(r, d)
   end
 
   if k3 then
-    -- pattern_shifts[r] = math.floor(pattern_shifts[r] + d/5) % 64
     params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + d) % ARC_SEGMENTS)
     return true
   end
 
   local sign = math.floor(d/math.abs(d))
-    -- raw_densities[r] = util.clamp(raw_densities[r] + d * 5, 0, ARC_RAW_DENSITY_RESOLUTION)
-    -- params:set("ring_density_"..r, math.floor(util.linlin(0, ARC_RAW_DENSITY_RESOLUTION, 0, DENSITY_MAX, raw_densities[r])))
   params:set("ring_density_"..r, params:get("ring_density_"..r) + sign)
   return true
 
@@ -650,7 +753,7 @@ function enc(n, d)
         params:set("clock_tempo", params:get("clock_tempo") + d)
       else
         local sign = math.floor(d/math.abs(d))
-        cursor_pos = util.clamp(cursor_pos + sign, 1, ARCS - CURSOR_LEN + 1)
+        screen_cursor = util.clamp(screen_cursor + sign, 1, ARCS - SCREEN_CURSOR_LEN + 1)
       end
     else
       params:set("clock_tempo", params:get("clock_tempo") + d)
@@ -663,7 +766,7 @@ function enc(n, d)
       if k1 then
         params:set("transpose", params:get("transpose") + d)
       else
-        local has_effect = enc_no_arc(cursor_pos, d)
+        local has_effect = enc_no_arc(screen_cursor, d)
         if has_effect then
           return
         end
@@ -679,7 +782,7 @@ function enc(n, d)
       if k1 then
           params:set("filter_freq", params:get("filter_freq") + d * 50)
       else
-        local has_effect = enc_no_arc(cursor_pos+1, d)
+        local has_effect = enc_no_arc(screen_cursor+1, d)
         if has_effect then
           return
         end
@@ -697,6 +800,8 @@ function enc(n, d)
 end
 
 arc_delta = function(r, d)
+  grid_cursor = r
+
   if k1 then
     if os.time() - prev_pattern_refresh_t[r] > 1 then
       gen_ring_pattern(r)
@@ -717,10 +822,14 @@ arc_delta = function(r, d)
 
   if k3 then
     -- pattern_shifts[r] = math.floor(pattern_shifts[r] + d/5) % 64
-    params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + d/5) % ARC_SEGMENTS)
+    params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + d/7) % ARC_SEGMENTS)
     return
   end
 
+  -- NB: it feels better to undo faster
+  if d < 0 then
+    d = d + d * 1/3
+  end
   raw_densities[r] = util.clamp(raw_densities[r] + d, 0, ARC_RAW_DENSITY_RESOLUTION)
   params:set("ring_density_"..r, math.floor(util.linlin(0, ARC_RAW_DENSITY_RESOLUTION, 0, DENSITY_MAX, raw_densities[r])))
 end
@@ -779,7 +888,7 @@ function redraw()
 
     screen.move(x + radius2, y)
     screen.circle(x, y, radius2)
-    if is_firing[r] and params:string("flash") == "on" then
+    if (is_firing[r] or math.abs(os.clock() - last_firing[r]) < FAST_FIRING_DELTA) and params:string("flash") == "on" then
       screen.fill()
     else
       screen.stroke()
@@ -790,7 +899,7 @@ function redraw()
     end
 
     if not has_arc then
-      if r >= cursor_pos and r < cursor_pos + CURSOR_LEN  then
+      if r >= screen_cursor and r < screen_cursor + SCREEN_CURSOR_LEN  then
         screen.level(5)
         screen.move(x - radius2 - 3, y + radius2 + 5)
         screen.line(x + radius2 + 3, y + radius2 + 5)
