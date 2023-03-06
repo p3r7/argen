@@ -92,6 +92,7 @@ local MAX_BPM = 2000
 
 local FAST_FIRING_DELTA = 0.02
 
+
 -- ------------------------------------------------------------------------
 -- state
 
@@ -121,6 +122,8 @@ local last_firing = {}
 
 local prev_pattern_refresh_t = {}
 
+local grid_shift = false
+local shift_quant = 1
 
 -- ------------------------------------------------------------------------
 -- core helpers
@@ -519,30 +522,33 @@ end
 function arc_unquantized_trigger()
   for r=1,ARCS do
     if params:string("ring_quantize_"..r) == "off" then
-      local is_already_firing = is_firing[r]
+      local prev_unquantized_rot_pos = unquantized_rot_pos[r]
       is_firing[r] = false
       local bpm = params:get("ring_bpm_"..r)
       local step = bpm / UNQUANTIZED_SAMPLES
       step = step / 8
       unquantized_rot_pos[r] = (unquantized_rot_pos[r] + step) % ARC_SEGMENTS
 
+      if math.floor(unquantized_rot_pos[r]) == math.floor(prev_unquantized_rot_pos) then
+        goto NEXT
+      end
+
       for i, v in ipairs(sparse_patterns[r]) do
         local radial_pos = (i + round(unquantized_rot_pos[r])) + params:get("ring_pattern_shift_"..r)
         while radial_pos < 0 do
           radial_pos = radial_pos + ARC_SEGMENTS
         end
-        -- radial_pos = round(radial_pos)
 
         if v == 1 then
           if radial_pos % ARC_SEGMENTS == 1 then
             is_firing[r] = true
-            if not is_already_firing then
-              note_trigger(r)
-              last_firing[r] = os.clock()
-            end
+            note_trigger(r)
+            last_firing[r] = os.clock()
           end
         end
       end
+
+      ::NEXT::
     end
   end
 end
@@ -600,7 +606,7 @@ function arc_segment_refresh()
       if params:get("ring_density_"..r) == 0 then
         sparse_patterns[r][i] = 0
       else
-        if patterns[r][i] > 1 and patterns[r][i] > (DENSITY_MAX - params:get("ring_density_"..r)) then
+        if patterns[r][i] >= 1 and patterns[r][i] > (DENSITY_MAX - params:get("ring_density_"..r)) then
           sparse_patterns[r][i] = 1
         else
           sparse_patterns[r][i] = 0
@@ -616,6 +622,9 @@ end
 
 function grid_redraw()
   g:all(0)
+
+  -- --------------------------------
+  -- left pane - pattern editor
 
   local r = grid_cursor
 
@@ -651,15 +660,29 @@ function grid_redraw()
       g:led(x, y, led_v)
     end
   end
+
+  -- --------------------------------
+  -- right pane - advanced controls
+
+  if g.cols > 8 then
+    g:led(16, 1, 2)
+    g:led(15, 1, 2)
+    g:led(14, 1, 2)
+    g:led(13, 1, 2)
+    g:led(12, 1, 2)
+  end
+
   g:refresh()
 end
 
 function grid_key(x, y, z)
   local r = grid_cursor
 
-  -- pattern edit
-  if z >= 1 then
-    if x <= math.min(g.cols, 8) then
+  -- --------------------------------
+  -- left pane - pattern editor
+
+  if x <= math.min(g.cols, 8) then
+    if z >= 1 then
       local i = ARC_SEGMENTS - (x + ((y-1) * 8))
       i = (i - params:get("ring_pattern_shift_"..r)) % 64
 
@@ -673,6 +696,46 @@ function grid_key(x, y, z)
         end
       end
     end
+  end
+
+  -- --------------------------------
+  -- right pane - advanced controls
+
+  if x == 16 and y ==1 then
+    -- shift 16
+    grid_shift = (z >= 1)
+    if grid_shift then
+      shift_quant = 16
+    else
+      shift_quant = 1
+    end
+  elseif x == 15 and y ==1 then
+    -- shift 8
+    grid_shift = (z >= 1)
+    if grid_shift then
+      shift_quant = 5
+    else
+      shift_quant = 1
+  end  elseif x == 14 and y ==1 then
+      -- shift 4
+      grid_shift = (z >= 1)
+      if grid_shift then
+        shift_quant = 4
+      else
+        shift_quant = 1
+      end
+  elseif x == 13 and y ==1 then
+    -- shift 2
+    grid_shift = (z >= 1)
+    if grid_shift then
+      shift_quant = 2
+    else
+      shift_quant = 1
+    end
+  elseif x == 12 and y ==1 then
+    -- shift 1
+    grid_shift = (z >= 1)
+    shift_quant = 1
   end
 
 end
@@ -739,6 +802,11 @@ function enc_no_arc(r, d)
     return true
   end
 
+  if grid_shift then
+    local sign = math.floor(d/math.abs(d))
+    params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + sign * shift_quant) % ARC_SEGMENTS)
+    return true
+  end
   if k3 then
     params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + d) % ARC_SEGMENTS)
     return true
@@ -824,6 +892,11 @@ arc_delta = function(r, d)
     return
   end
 
+  if grid_shift then
+    local sign = math.floor(d/math.abs(d))
+    params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + sign * shift_quant) % ARC_SEGMENTS)
+    return true
+  end
   if k3 then
     -- pattern_shifts[r] = math.floor(pattern_shifts[r] + d/5) % 64
     params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + d/7) % ARC_SEGMENTS)
