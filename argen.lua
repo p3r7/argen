@@ -245,6 +245,7 @@ end
   local ON_OFF = {"on", "off"}
   local OFF_ON = {"off", "on"}
 
+  nb.voice_count = 4
   nb:init()
 
   params:add_option("flash", "Animation Flash ", OFF_ON)
