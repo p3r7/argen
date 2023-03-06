@@ -236,7 +236,10 @@ function init()
   end
 
   g = grid.connect(1)
-  g.key = grid_key
+  if g.device ~= nil then
+    g.key = grid_key
+    has_grid = true
+end
 
   local OUT_VOICE_MODES = {"sample", "nb"}
   local ON_OFF = {"on", "off"}
@@ -898,15 +901,27 @@ function redraw()
       screen.pixel(x, y)
     end
 
+    screen.aa(0)
+    screen.line_width(1.5)
+    screen.level(5)
     if not has_arc then
       if r >= screen_cursor and r < screen_cursor + SCREEN_CURSOR_LEN  then
-        screen.level(5)
         screen.move(x - radius2 - 3, y + radius2 + 5)
         screen.line(x + radius2 + 3, y + radius2 + 5)
         screen.stroke()
-        screen.level(15)
       end
     end
+
+    if has_grid then
+      if r == grid_cursor then
+        screen.move(x - radius2 - 1, y + radius2 + 8)
+        screen.line(x + radius2 + 1, y + radius2 + 8)
+        screen.stroke()
+      end
+    end
+    screen.aa(1)
+    screen.line_width(1)
+    screen.level(15)
 
     for i=1,ARC_SEGMENTS do
 
