@@ -101,6 +101,8 @@ local PAUSED = "paused"
 
 local a = nil
 local g = nil
+local midi_in_transport = nil
+local midi_out_transport = nil
 
 local has_arc = false
 local SCREEN_CURSOR_LEN = 2
@@ -133,7 +135,8 @@ local pos_quant = INIT_POS
 local unquantized_rot_pos = {}
 
 local playback_status = STARTED
-local pause_btn_on = false
+local play_btn_on = false
+local was_stopped = false
 
 local function reset_playback_heads()
   pos_quant = INIT_POS
@@ -142,17 +145,57 @@ local function reset_playback_heads()
   end
 end
 
-local function stop_playback()
+local function stop_playback(is_originator)
+    if is_originator == true and midi_out_transport ~= nil and params:string("midi_transport_in") == "on" then
+    midi_out_transport:stop()
+  end
   reset_playback_heads()
   playback_status = PAUSED
+  was_stopped = true
 end
 
-local function pause_playback()
+local function pause_playback(is_originator)
+  if is_originator == true and midi_out_transport ~= nil and params:string("midi_transport_in") == "on" then
+    midi_out_transport:stop()
+  end
   playback_status = PAUSED
 end
 
-local function start_playback()
+local function start_playback(is_originator)
+  if is_originator == true and midi_out_transport ~= nil and params:string("midi_transport_in") == "on" then
+    if was_stopped then
+      midi_out_transport:start()
+      was_stopped = false
+    else
+      midi_out_transport:continue()
+    end
+  end
   playback_status = STARTED
+end
+
+local function restart_playback(is_originator)
+  if is_originator == true and midi_out_transport ~= nil and params:string("midi_transport_in") == "on" then
+    midi_out_transport:start()
+  end
+  reset_playback_heads()
+  playback_status = STARTED
+end
+
+local function midi_in_transport_event(data)
+  if params:string("midi_transport_in") == "off" then
+    return
+  end
+
+  local msg = midi.to_msg(data)
+
+  if msg.type == "start" then
+    stop_playback()
+    start_playback()
+  elseif msg.type == "stop" then
+    pause_playback()
+  elseif msg.type == "continue" then
+    start_playback()
+  end
 end
 
 
@@ -324,6 +367,8 @@ function init()
 
   grid_connect_maybe()
   arc_connect_maybe()
+  midi_in_transport = midi.connect(1)
+  midi_in_transport.event = midi_in_transport_event
 
   local OUT_VOICE_MODES = {"sample", "nb"}
   local ON_OFF = {"on", "off"}
@@ -446,6 +491,39 @@ function init()
          end
   end}
 
+  params:add_option("midi_transport_in", "MIDI Transport IN ", OFF_ON)
+  params:set_action("midi_transport_in",
+                    function(v)
+                      if OFF_ON[v] == "on" then
+                        params:show("midi_transport_in_device")
+                      else
+                        params:hide("midi_transport_in_device")
+                      end
+                      _menu.rebuild_params()
+                    end
+  )
+
+  params:add{type = "number", id = "midi_transport_in_device", name = "MIDI Transport IN Dev", min = 1, max = 16, default = 1, action = function(value)
+               midi_in_transport.event = nil
+               midi_in_transport = midi.connect(value)
+               midi_in_transport.event = midi_in_transport_event
+  end}
+
+  params:add_option("midi_transport_out", "MIDI Transport OUT ", OFF_ON)
+  params:set_action("midi_transport_out",
+                    function(v)
+                      if OFF_ON[v] == "on" then
+                        params:show("midi_transport_out_device")
+                      else
+                        params:hide("midi_transport_out_device")
+                      end
+                      _menu.rebuild_params()
+                    end
+  )
+
+  params:add{type = "number", id = "midi_transport_out_device", name = "MIDI Transport OUT Dev", min = 1, max = 16, default = 1, action = function(value)
+               midi_out_transport = midi.connect(value)
+  end}
 
   Timber.options.PLAY_MODE_BUFFER_DEFAULT = 4
   Timber.options.PLAY_MODE_STREAMING_DEFAULT = 3
@@ -835,17 +913,17 @@ function grid_key(x, y, z)
   end
 
   if x == 13 and y == 5 then
-    pause_btn_on = (z >= 1)
-    if pause_btn_on then
-      start_playback()
+    play_btn_on = (z >= 1)
+    if play_btn_on then
+      start_playback(true)
     end
   elseif x == 14 and y == 5 and (z >= 1)then
-    pause_playback()
+    pause_playback(true)
   elseif x == 15 and y == 5 and (z >= 1) then
-    stop_playback()
-    if pause_btn_on then
-      -- reset
-      start_playback()
+    if play_btn_on then
+      restart_playback(true)
+    else
+      stop_playback(true)
     end
   end
 end
