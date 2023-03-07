@@ -108,11 +108,11 @@ local has_grid = false
 
 local s_lattice
 
-patterns = {}
-sparse_patterns = {}
+local patterns = {}
+local sparse_patterns = {}
 
-pos_quant = INIT_POS
-unquantized_rot_pos = {}
+local pos_quant = INIT_POS
+local unquantized_rot_pos = {}
 
 -- NB: hisher resolution ring density values when setting via arc
 local raw_densities = {}
@@ -267,6 +267,27 @@ grid.remove = grid_remove_maybe
 
 arc.add = arc_connect_maybe
 arc.remove = arc_remove_maybe
+
+params.action_read = function(filename, name, pset_number)
+	local seqfiles = filename .. ".argenseqs"
+	if util.file_exists(seqfiles) then
+		patterns = tab.load(seqfiles)
+	elseif params.last_chance then
+		params.last_chance = nil
+	else
+		-- try *one time* to convert it.
+		params.last_chance = true
+		rw.rewrite(filename)
+		params:read(filename)
+	end
+	-- for _, player in pairs(nb:get_players()) do
+	-- 	player:stop_all()
+	-- end
+end
+
+params.action_write = function(filename, name, pset_number)
+	tab.save(patterns, filename .. ".argenseqs")
+end
 
 function init()
   screen.aa(1)
