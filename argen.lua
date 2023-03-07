@@ -273,10 +273,17 @@ params.action_read = function(filename, name, pset_number)
 	if util.file_exists(seqfiles) then
 		patterns = tab.load(seqfiles)
 	end
+	-- for _, player in pairs(nb:get_players()) do
+	-- 	player:stop_all()
+	-- end
 end
 
 params.action_write = function(filename, name, pset_number)
 	tab.save(patterns, filename .. ".argenseqs")
+end
+
+params.action_delete = function(filename, name, pset_number)
+	os.execute("rm -f" .. filename .. ".argenseqs")
 end
 
 function init()
