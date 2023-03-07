@@ -272,17 +272,7 @@ params.action_read = function(filename, name, pset_number)
 	local seqfiles = filename .. ".argenseqs"
 	if util.file_exists(seqfiles) then
 		patterns = tab.load(seqfiles)
-	elseif params.last_chance then
-		params.last_chance = nil
-	else
-		-- try *one time* to convert it.
-		params.last_chance = true
-		rw.rewrite(filename)
-		params:read(filename)
 	end
-	-- for _, player in pairs(nb:get_players()) do
-	-- 	player:stop_all()
-	-- end
 end
 
 params.action_write = function(filename, name, pset_number)
