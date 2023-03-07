@@ -92,6 +92,9 @@ local MAX_BPM = 2000
 
 local FAST_FIRING_DELTA = 0.02
 
+local STARTED = "started"
+local PAUSED = "paused"
+
 
 -- ------------------------------------------------------------------------
 -- state
@@ -111,9 +114,6 @@ local s_lattice
 local patterns = {}
 local sparse_patterns = {}
 
-local pos_quant = INIT_POS
-local unquantized_rot_pos = {}
-
 -- NB: hisher resolution ring density values when setting via arc
 local raw_densities = {}
 
@@ -124,6 +124,36 @@ local prev_pattern_refresh_t = {}
 
 local grid_shift = false
 local shift_quant = 1
+
+
+-- ------------------------------------------------------------------------
+-- state - playback
+
+local pos_quant = INIT_POS
+local unquantized_rot_pos = {}
+
+local playback_status = STARTED
+local pause_btn_on = false
+
+local function reset_playback_heads()
+  pos_quant = INIT_POS
+  for r=1,ARCS do
+    unquantized_rot_pos[r] = INIT_POS
+  end
+end
+
+local function stop_playback()
+  reset_playback_heads()
+  playback_status = PAUSED
+end
+
+local function pause_playback()
+  playback_status = PAUSED
+end
+
+local function start_playback()
+  playback_status = STARTED
+end
 
 
 -- ------------------------------------------------------------------------
@@ -327,7 +357,6 @@ function init()
     sparse_patterns[r] = gen_empty_pattern()
     raw_densities[r] = 0
     prev_pattern_refresh_t[r] = 0
-    unquantized_rot_pos[r] = INIT_POS
     is_firing[r] = false
     last_firing[r] = 0.0
 
@@ -338,6 +367,8 @@ function init()
                       function(v)
                       gen_ring_pattern(r)
     end)
+    reset_playback_heads()
+
 
     params:add{type = "number", id = "ring_density_"..r, name = "Density "..r, min = 0, max = DENSITY_MAX, default = 0}
     params:set_action("ring_density_"..r,
@@ -542,6 +573,9 @@ function pos_2_radial_pos(pos, shift, i)
 end
 
 function arc_quantized_trigger()
+  if playback_status == PAUSED then
+    return
+  end
 
   pos_quant = pos_quant + 1
   if pos_quant > ARC_SEGMENTS then
@@ -571,6 +605,10 @@ function arc_quantized_trigger()
 end
 
 function arc_unquantized_trigger()
+  if playback_status == PAUSED then
+    return
+  end
+
   for r=1,ARCS do
     if params:string("ring_quantize_"..r) == "off" then
       local prev_unquantized_rot_pos = unquantized_rot_pos[r]
@@ -716,11 +754,17 @@ function grid_redraw()
   -- right pane - advanced controls
 
   if g.cols > 8 then
-    g:led(16, 1, 2)
-    g:led(15, 1, 2)
-    g:led(14, 1, 2)
-    g:led(13, 1, 2)
-    g:led(12, 1, 2)
+    -- (quantized) pattern shift
+    g:led(16, 1, 2) -- 1
+    g:led(15, 1, 2) -- 2
+    g:led(14, 1, 2) -- 4
+    g:led(13, 1, 2) -- 8
+    g:led(12, 1, 2) -- 16
+
+    -- stop / pause / start
+    g:led(13, 5, 2) -- start
+    g:led(14, 5, 2) -- pause
+    g:led(15, 5, 2) -- stop
   end
 
   g:refresh()
@@ -767,7 +811,8 @@ function grid_key(x, y, z)
       shift_quant = 5
     else
       shift_quant = 1
-  end  elseif x == 14 and y ==1 then
+    end
+  elseif x == 14 and y ==1 then
       -- shift 4
       grid_shift = (z >= 1)
       if grid_shift then
@@ -789,6 +834,20 @@ function grid_key(x, y, z)
     shift_quant = 1
   end
 
+  if x == 13 and y == 5 then
+    pause_btn_on = (z >= 1)
+    if pause_btn_on then
+      start_playback()
+    end
+  elseif x == 14 and y == 5 and (z >= 1)then
+    pause_playback()
+  elseif x == 15 and y == 5 and (z >= 1) then
+    stop_playback()
+    if pause_btn_on then
+      -- reset
+      start_playback()
+    end
+  end
 end
 
 -- ------------------------------------------------------------------------
