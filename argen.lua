@@ -125,6 +125,7 @@ local prev_pattern_refresh_t = {}
 local grid_shift = false
 local shift_quant = 1
 
+
 -- ------------------------------------------------------------------------
 -- core helpers
 
@@ -226,23 +227,55 @@ local arc_unquantized_clock
 
 local arc_delta
 
+function grid_connect_maybe(_g)
+  if not has_grid then
+    g = grid.connect()
+    if g.device ~= nil then
+      g.key = grid_key
+      has_grid = true
+    end
+  end
+end
+
+function grid_remove_maybe(_g)
+  if g.device.port == _g.port then
+    -- current grid got deconnected
+    has_grid = false
+  end
+end
+
+
+function arc_connect_maybe(_a)
+  if not has_arc then
+    a = arc.connect()
+    if a.name ~= "none" and a.device ~= nil then
+      a.delta = arc_delta
+      has_arc = true
+    end
+  end
+end
+
+function arc_remove_maybe(_a)
+  if a.device.port == _a.port then
+    -- current arc got deconnected
+    has_arc = false
+  end
+end
+
+grid.add = grid_connect_maybe
+grid.remove = grid_remove_maybe
+
+arc.add = arc_connect_maybe
+arc.remove = arc_remove_maybe
+
 function init()
   screen.aa(1)
   screen.line_width(1)
 
   s_lattice = lattice:new{}
 
-  a = arc.connect(1)
-  if a.name ~= "none" and a.device ~= nil then
-    a.delta = arc_delta
-    has_arc = true
-  end
-
-  g = grid.connect(1)
-  if g.device ~= nil then
-    g.key = grid_key
-    has_grid = true
-end
+  grid_connect_maybe()
+  arc_connect_maybe()
 
   local OUT_VOICE_MODES = {"sample", "nb"}
   local ON_OFF = {"on", "off"}
