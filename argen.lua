@@ -108,6 +108,7 @@ local has_arc = false
 local SCREEN_CURSOR_LEN = 2
 local screen_cursor = 1
 local grid_cursor = 1
+local grid_all_rings = false
 
 local has_grid = false
 
@@ -910,6 +911,8 @@ function grid_redraw()
   -- right pane - advanced controls
 
   if g.cols > 8 then
+    local l = 2
+
     -- (quantized) pattern shift
     g:led(16, 1, 2) -- 1
     g:led(15, 1, 2) -- 2
@@ -918,9 +921,29 @@ function grid_redraw()
     g:led(12, 1, 2) -- 16
 
     -- stop / pause / start
-    g:led(13, 5, 2) -- start
-    g:led(14, 5, 2) -- pause
-    g:led(15, 5, 2) -- stop
+    l = 2
+    if playback_status == STARTED then l = 5 end
+    g:led(13, 5, l) -- start
+    l = 2
+    if playback_status == PAUSED and not was_stopped then l = 5 end
+    g:led(14, 5, l) -- pause
+    l = 2
+    if playback_status == PAUSED and was_stopped then l = 5 end
+    g:led(15, 5, l) -- stop
+
+    -- ring select
+    --  - all
+    l = 3
+    if grid_all_rings then l = 5 end
+    g:led(9, 7, l)
+    --  - independant
+    local x_start = 11
+    for r=1,ARCS do
+      local x = x_start + r - 1
+      local l = 2
+      if grid_cursor == r then l = 5 end
+      g:led(x, 7, l)
+    end
   end
 
   g:refresh()
@@ -952,6 +975,7 @@ function grid_key(x, y, z)
   -- --------------------------------
   -- right pane - advanced controls
 
+  -- pattern shift
   if x == 16 and y ==1 then
     -- shift 16
     grid_shift = (z >= 1)
@@ -990,6 +1014,7 @@ function grid_key(x, y, z)
     shift_quant = 1
   end
 
+  -- start/pause/stop
   if x == 13 and y == 5 then
     play_btn_on = (z >= 1)
     if play_btn_on then
@@ -1004,6 +1029,22 @@ function grid_key(x, y, z)
       stop_playback(true)
     end
   end
+
+
+  -- ring select
+  --  - all
+  if x == 9 and y == 7 then
+    grid_all_rings = (z >= 1)
+  end
+  --  - independant
+  local x_start = 11
+  for r=1,ARCS do
+    local rx = x_start + r - 1
+    if rx == x and y == 7 and z >= 1 then
+      grid_cursor = r
+    end
+  end
+
 end
 
 -- ------------------------------------------------------------------------
@@ -1137,9 +1178,7 @@ function enc(n, d)
 
 end
 
-arc_delta = function(r, d)
-  grid_cursor = r
-
+arc_delta_single = function(r, d)
   if k1 then
     if os.time() - prev_pattern_refresh_t[r] > 1 then
       gen_ring_pattern(r)
@@ -1177,6 +1216,16 @@ arc_delta = function(r, d)
   params:set("ring_density_"..r, math.floor(util.linlin(0, ARC_RAW_DENSITY_RESOLUTION, 0, DENSITY_MAX, raw_densities[r])))
 end
 
+arc_delta = function(r, d)
+  if grid_all_rings then
+    for r=1,ARCS do
+      arc_delta_single(r, d)
+    end
+  else
+    grid_cursor = r
+    arc_delta_single(r, d)
+  end
+end
 
 
 -- ------------------------------------------------------------------------
