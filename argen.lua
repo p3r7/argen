@@ -165,12 +165,12 @@ local function start_playback(is_originator)
   if is_originator == true and midi_out_transport ~= nil and params:string("midi_transport_in") == "on" then
     if was_stopped then
       midi_out_transport:start()
-      was_stopped = false
     else
       midi_out_transport:continue()
     end
   end
   playback_status = STARTED
+  was_stopped = false
 end
 
 local function restart_playback(is_originator)
