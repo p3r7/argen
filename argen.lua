@@ -200,6 +200,55 @@ end
 
 
 -- ------------------------------------------------------------------------
+-- samples
+
+local RND_SAMPLE_FOLDERS = {
+  "common/606",
+  "common/808",
+  "common/909",
+  "blips/*",
+}
+
+found_sample_kits = {}
+found_sample_kits_samples = {}
+found_samples = {}
+nb_found_sample_kits = 0
+nb_found_sample_kits_samples = {}
+nb_found_samples = 0
+last_sample_scan_ts = 0
+
+-- basically `util.scandir` but only for subfolders
+local function scandirdir(directory)
+  local i, t, popen = 0, {}, io.popen
+  local pfile = popen('find '..directory..' -maxdepth 1 -type d')
+  for filename in pfile:lines() do
+    i = i + 1
+    t[i] = filename
+  end
+  pfile:close()
+  return t
+end
+
+function rescan_samples()
+  for _, d in ipairs(RND_SAMPLE_FOLDERS) do
+    found = scandirdir(_path.audio .. d)
+    for _, d2 in ipairs(found) do
+      nb_found_sample_kits = nb_found_sample_kits+1
+      table.insert(found_sample_kits, d2)
+      found_sample_kits_samples[d2] = {}
+      nb_found_sample_kits_samples[d2] = 0
+      for _, s in ipairs(util.scandir(d2)) do
+        nb_found_samples = nb_found_samples+1
+        nb_found_sample_kits_samples[d2] = nb_found_sample_kits_samples[d2]+1
+        table.insert(found_samples, d2.."/"..s)
+        table.insert(found_sample_kits_samples[d2], d2.."/"..s)
+      end
+    end
+  end
+  last_sample_scan_ts = os.time()
+end
+
+-- ------------------------------------------------------------------------
 -- core helpers
 
 local function rnd(x)
@@ -371,18 +420,36 @@ function init()
   midi_in_transport.event = midi_in_transport_event
 
   local OUT_VOICE_MODES = {"sample", "nb"}
+  local RANDOMIZE_MODES = {"ptrn", "ptrn+kit", "ptrn+smpl"}
   local ON_OFF = {"on", "off"}
   local OFF_ON = {"off", "on"}
 
   nb.voice_count = 4
   nb:init()
 
-  params:add_option("flash", "Animation Flash ", OFF_ON)
+  params:add_option("flash", "Animation Flash", OFF_ON)
+
+  params:add_option("gen_all_mode", "Randomize Mode", RANDOMIZE_MODES)
 
   params:add_trigger("gen_all", "Randomize")
   params:set_action("gen_all",
                     function(v)
                       srand(os.time())
+
+                      if params:string("gen_all_mode") == "ptrn+smpl"
+                        or params:string("gen_all_mode") == "ptrn+kit" then
+                        if os.time() - last_sample_scan_ts > 60 then
+                          rescan_samples()
+                        end
+                      end
+
+                      local kit
+                      if params:string("gen_all_mode") == "ptrn+kit" then
+                        kit = found_sample_kits[math.random(nb_found_sample_kits)]
+                        print("Loading sample kit: "..kit)
+                      end
+
+
                       for r=1,ARCS do
                         params:set("ring_gen_pattern_"..r, 1)
                         local density = DENSITY_MAX
@@ -394,7 +461,18 @@ function init()
                         end
                         params:set("ring_density_"..r, density)
                         params:set("ring_pattern_shift_"..r, 0)
+
+                        if params:string("gen_all_mode") == "ptrn+kit" then
+                          local si = math.random(nb_found_sample_kits_samples[kit])
+                          Timber.load_sample(r, found_sample_kits_samples[kit][si])
+                        elseif params:string("gen_all_mode") == "ptrn+smpl" then
+                          local si = math.random(nb_found_samples)
+                          Timber.load_sample(r, found_samples[si])
+                        end
                       end
+
+
+                    -- end
   end)
 
   for r=1,ARCS do
