@@ -122,9 +122,6 @@ local sparse_patterns = {}
 -- NB: hisher resolution ring density values when setting via arc
 local raw_densities = {}
 
-local is_firing = {}
-local last_firing = {}
-
 local prev_pattern_refresh_t = {}
 
 local grid_shift = false
@@ -132,11 +129,17 @@ local shift_quant = 1
 
 local prev_global_transpose = 0
 
+
 -- ------------------------------------------------------------------------
 -- state - playback
 
 local pos_quant = INIT_POS
 local unquantized_rot_pos = {}
+
+local is_firing = {}
+local last_firing = {}
+
+local mutes = {}
 
 local playback_status = STARTED
 local play_btn_on = false
@@ -486,6 +489,7 @@ function init()
     prev_pattern_refresh_t[r] = 0
     is_firing[r] = false
     last_firing[r] = 0.0
+    mutes[r] = false
     grid_hot_cursors[r] = false
     params:add_group("Ring " .. r, 11)
 
@@ -754,7 +758,7 @@ function arc_quantized_trigger()
         local radial_pos = pos_2_radial_pos(pos_quant, params:get("ring_pattern_shift_"..r), i)
 
         if v == 1 then
-          if radial_pos % ARC_SEGMENTS == 1 then
+          if radial_pos % ARC_SEGMENTS == 1 and not mutes[r] then
             note_trigger(r)
             is_firing[r] = true
             last_firing[r] = os.clock()
@@ -790,7 +794,7 @@ function arc_unquantized_trigger()
         end
 
         if v == 1 then
-          if radial_pos % ARC_SEGMENTS == 1 then
+          if radial_pos % ARC_SEGMENTS == 1 and not mutes[r] then
             is_firing[r] = true
             note_trigger(r)
             last_firing[r] = os.clock()
@@ -1029,6 +1033,7 @@ function grid_key(x, y, z)
   -- start/pause/stop
   if x == 13 and y == 5 then
     play_btn_on = (z >= 1)
+
     if play_btn_on then
       start_playback(true)
     end
@@ -1043,13 +1048,17 @@ function grid_key(x, y, z)
   end
 
 
-  -- ring select
+  -- ring select / mute
   --  - all
   local grid_all_rings_pressed = false
   if x == 9 and y == 7 then
     grid_all_rings_pressed = (z >= 1)
     grid_all_rings = grid_all_rings_pressed
+    for r=1,ARCS do
+      mutes[r] = (grid_all_rings_pressed and play_btn_on)
+    end
   end
+
   --  - independant
   local x_start = 11
   local any_hot_cursor = false
@@ -1062,6 +1071,9 @@ function grid_key(x, y, z)
         any_hot_cursor = true
       end
       grid_hot_cursors[r] = pressed
+      if play_btn_on then
+        mutes[r] = pressed
+      end
     end
   end
   any_grid_hot_cursor = any_hot_cursor
@@ -1080,7 +1092,6 @@ function grid_key(x, y, z)
   if not grid_all_rings_pressed then
     grid_all_rings = grid_all_hot_pressed
   end
-
 end
 
 -- ------------------------------------------------------------------------
