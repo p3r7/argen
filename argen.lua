@@ -109,6 +109,8 @@ local SCREEN_CURSOR_LEN = 2
 local screen_cursor = 1
 local grid_cursor = 1
 local grid_all_rings = false
+local grid_hot_cursors = {}
+local any_grid_hot_cursor
 
 local has_grid = false
 
@@ -128,6 +130,7 @@ local prev_pattern_refresh_t = {}
 local grid_shift = false
 local shift_quant = 1
 
+local prev_global_transpose = 0
 
 -- ------------------------------------------------------------------------
 -- state - playback
@@ -483,7 +486,7 @@ function init()
     prev_pattern_refresh_t[r] = 0
     is_firing[r] = false
     last_firing[r] = 0.0
-
+    grid_hot_cursors[r] = false
     params:add_group("Ring " .. r, 11)
 
     params:add_trigger("ring_gen_pattern_"..r, "Generate "..r)
@@ -553,21 +556,22 @@ function init()
   nb:add_player_params()
 
   params:add{type = "control", id = "filter_freq", name = "Filter Cutoff", controlspec = ControlSpec.new(60, 20000, "exp", 0, 3000, "Hz"), formatter = Formatters.format_freq, action = function(v)
-               for i = 1, 4 do
-                 params:set('filter_freq_'..i, v)
+               for r=1,ARCS do
+                 params:set('filter_freq_'..r, v)
                end
   end}
 
   params:add{type = "control", id = "filter_resonance", name = "Filter Resonance", controlspec = ControlSpec.new(0, 1, "lin", 0, 0.3, ""), action = function(v)
-               for i = 1, 4 do
-                 params:set('filter_resonance_'..i, v)
+               for r=1,ARCS do
+                 params:set('filter_resonance_'..r, v)
                end
   end}
 
   params:add{type = "number", id = "transpose", name = "Transpose", min = -48, max = 48, default = 0, formatter = format_st, action = function(v)
-         for i = 1, 4 do
-           params:set('transpose_'..i, v)
-         end
+               for r=1,ARCS do
+                 local delta = v - prev_global_transpose
+                 params:set('transpose_'..r, params:get('transpose_'..r) + delta)
+               end
   end}
 
   params:add_option("midi_transport_in", "MIDI Transport IN ", OFF_ON)
@@ -941,7 +945,15 @@ function grid_redraw()
     for r=1,ARCS do
       local x = x_start + r - 1
       local l = 2
-      if grid_cursor == r then l = 5 end
+      if grid_cursor == r then
+        if grid_hot_cursors[r] or grid_all_rings then
+          l = 10
+        else
+          l = 5
+        end
+      elseif grid_hot_cursors[r] or grid_all_rings then
+        l = 4
+      end
       g:led(x, 7, l)
     end
   end
@@ -1033,16 +1045,40 @@ function grid_key(x, y, z)
 
   -- ring select
   --  - all
+  local grid_all_rings_pressed = false
   if x == 9 and y == 7 then
-    grid_all_rings = (z >= 1)
+    grid_all_rings_pressed = (z >= 1)
+    grid_all_rings = grid_all_rings_pressed
   end
   --  - independant
   local x_start = 11
+  local any_hot_cursor = false
   for r=1,ARCS do
     local rx = x_start + r - 1
-    if rx == x and y == 7 and z >= 1 then
-      grid_cursor = r
+    if rx == x and y == 7 then
+      local pressed = (z >= 1)
+      if pressed then
+        grid_cursor = r
+        any_hot_cursor = true
+      end
+      grid_hot_cursors[r] = pressed
     end
+  end
+  any_grid_hot_cursor = any_hot_cursor
+
+  local grid_all_hot_pressed = false
+  local nb_hot_cursor = 0
+  for r=1,ARCS do
+    if grid_hot_cursors[r] then
+      nb_hot_cursor = nb_hot_cursor + 1
+    end
+  end
+  if nb_hot_cursor == ARCS then
+    grid_all_hot_pressed = true
+  end
+
+  if not grid_all_rings_pressed then
+    grid_all_rings = grid_all_hot_pressed
   end
 
 end
@@ -1095,6 +1131,19 @@ function key(n, v)
 
 end
 
+function pitch_transpose_delta(d)
+  if any_grid_hot_cursor and not grid_all_rings then
+    for r=1,ARCS do
+      if grid_hot_cursors[r] then
+        params:set('transpose_'..r, params:get('transpose_'..r) + d)
+      end
+    end
+  else
+    prev_global_transpose = params:get("transpose")
+    params:set("transpose", params:get("transpose") + d)
+  end
+end
+
 function enc_no_arc(r, d)
   grid_cursor = r
 
@@ -1143,7 +1192,7 @@ function enc(n, d)
   if n == 2 then
     if not has_arc then
       if k1 then
-        params:set("transpose", params:get("transpose") + d)
+        pitch_transpose_delta(d)
       else
         local has_effect = enc_no_arc(screen_cursor, d)
         if has_effect then
@@ -1151,7 +1200,7 @@ function enc(n, d)
         end
       end
     else
-      params:set("transpose", params:get("transpose") + d)
+      pitch_transpose_delta(d)
     end
     return
   end
