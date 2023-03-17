@@ -111,7 +111,8 @@ local grid_cursor = 1
 local has_arc = false
 local has_grid = false
 
-local grid_all_rings = false
+grid_all_rings = false
+grid_all_rings_btn = false
 local grid_hot_cursors = {}
 any_grid_hot_cursor = false
 
@@ -143,7 +144,7 @@ local last_firing = {}
 local mutes = {}
 
 local playback_status = STARTED
-local play_btn_on = false
+play_btn_on = false
 local was_stopped = false
 
 local function reset_playback_heads()
@@ -1048,38 +1049,31 @@ function grid_key(x, y, z)
     end
   end
 
-
   -- ring select / mute
   --  - all
-  local grid_all_rings_pressed = false
+  local is_grid_all_k = false
   if x == 9 and y == 7 then
-    grid_all_rings_pressed = (z >= 1)
-    grid_all_rings = grid_all_rings_pressed
-    for r=1,ARCS do
-      mutes[r] = (grid_all_rings_pressed and play_btn_on)
-    end
+    grid_all_rings_btn = (z >= 1)
   end
 
   --  - independant
   local x_start = 11
-  local any_hot_cursor = false
+  local is_curr_key_cursor_sel = false
   for r=1,ARCS do
     local rx = x_start + r - 1
     if rx == x and y == 7 then
+      is_curr_key_cursor_sel = true
       local pressed = (z >= 1)
       if pressed then
         if not any_grid_hot_cursor then
           grid_cursor = r
         end
-        any_hot_cursor = true
       end
       grid_hot_cursors[r] = pressed
-      if play_btn_on then
-        mutes[r] = pressed
-      end
     end
   end
-  any_grid_hot_cursor = any_hot_cursor
+
+  -- recompute global state
 
   local grid_all_hot_pressed = false
   local nb_hot_cursor = 0
@@ -1088,13 +1082,25 @@ function grid_key(x, y, z)
       nb_hot_cursor = nb_hot_cursor + 1
     end
   end
+  any_grid_hot_cursor = (nb_hot_cursor > 0)
   if nb_hot_cursor == ARCS then
     grid_all_hot_pressed = true
   end
 
-  if not grid_all_rings_pressed then
-    grid_all_rings = grid_all_hot_pressed
+  -- FIXME: dirty code
+  if grid_all_rings_btn or grid_all_hot_pressed then
+    grid_all_rings = true
+  else
+    grid_all_rings = false
   end
+
+  for r=1,ARCS do
+    mutes[r] = false
+    if play_btn_on and (grid_all_rings or grid_hot_cursors[r]) then
+      mutes[r] = true
+    end
+  end
+
 end
 
 -- ------------------------------------------------------------------------
