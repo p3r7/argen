@@ -113,7 +113,7 @@ local has_grid = false
 
 local grid_all_rings = false
 local grid_hot_cursors = {}
-local any_grid_hot_cursor
+any_grid_hot_cursor = false
 
 local s_lattice
 
@@ -1062,7 +1062,7 @@ function grid_key(x, y, z)
 
   --  - independant
   local x_start = 11
-  local any_hot_cursor_t = false
+  local any_hot_cursor = false
   for r=1,ARCS do
     local rx = x_start + r - 1
     if rx == x and y == 7 then
