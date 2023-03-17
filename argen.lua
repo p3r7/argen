@@ -1347,6 +1347,12 @@ function redraw()
       radius2 = radius / 3
     end
 
+    if mutes[r] then
+      screen.level(5)
+    else
+      screen.level(15)
+    end
+
     screen.move(x + radius2, y)
     screen.circle(x, y, radius2)
     if (is_firing[r] or math.abs(os.clock() - last_firing[r]) < FAST_FIRING_DELTA) and params:string("flash") == "on" then
@@ -1358,6 +1364,8 @@ function redraw()
     if params:string("ring_quantize_"..r) == "off" then
       screen.pixel(x, y)
     end
+
+    screen.level(15)
 
     screen.aa(0)
     screen.line_width(1.5)
@@ -1402,12 +1410,20 @@ function redraw()
       end
 
       if sparse_patterns[r][i] == 1 then
-      local radial_pos = (i + display_pos) + params:get("ring_pattern_shift_"..r) + (ARC_SEGMENTS/4)
-      while radial_pos < 0 do
-        radial_pos = radial_pos + ARC_SEGMENTS
-      end
+        local radial_pos = (i + display_pos) + params:get("ring_pattern_shift_"..r) + (ARC_SEGMENTS/4)
+        while radial_pos < 0 do
+          radial_pos = radial_pos + ARC_SEGMENTS
+        end
+
+        if mutes[r] then
+          screen.level(5)
+        else
+          screen.level(15)
+        end
 
         screen.pixel(x + (radius + 4) * cos(radial_pos/ARC_SEGMENTS) * -1, y + (radius + 4) * sin(radial_pos/ARC_SEGMENTS))
+
+        screen.level(15)
       end
     end
 
