@@ -104,15 +104,16 @@ local g = nil
 local midi_in_transport = nil
 local midi_out_transport = nil
 
-local has_arc = false
 local SCREEN_CURSOR_LEN = 2
 local screen_cursor = 1
 local grid_cursor = 1
+
+local has_arc = false
+local has_grid = false
+
 local grid_all_rings = false
 local grid_hot_cursors = {}
 local any_grid_hot_cursor
-
-local has_grid = false
 
 local s_lattice
 
@@ -1061,13 +1062,15 @@ function grid_key(x, y, z)
 
   --  - independant
   local x_start = 11
-  local any_hot_cursor = false
+  local any_hot_cursor_t = false
   for r=1,ARCS do
     local rx = x_start + r - 1
     if rx == x and y == 7 then
       local pressed = (z >= 1)
       if pressed then
-        grid_cursor = r
+        if not any_grid_hot_cursor then
+          grid_cursor = r
+        end
         any_hot_cursor = true
       end
       grid_hot_cursors[r] = pressed
