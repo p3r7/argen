@@ -44,6 +44,8 @@
 -- ------------------------------------------------------------------------
 -- deps
 
+local mod = require 'core/mods'
+
 local lattice = require "lattice"
 local MusicUtil = require "musicutil"
 local ControlSpec = require "controlspec"
@@ -94,6 +96,54 @@ local FAST_FIRING_DELTA = 0.02
 
 local STARTED = "started"
 local PAUSED = "paused"
+
+
+-- ------------------------------------------------------------------------
+-- core helpers
+
+local function rnd(x)
+  if x == 0 then
+    return 0
+  end
+  if (not x) then
+    x = 1
+  end
+  x = x * 100000
+  x = math.random(x) / 100000
+  return x
+end
+
+local function srand(x)
+  if not x then
+    x = 0
+  end
+  math.randomseed(x)
+end
+
+function round(v)
+  return math.floor(v+0.5)
+end
+
+local function cos(x)
+  return math.cos(math.rad(x * 360))
+end
+
+local function sin(x)
+  return -math.sin(math.rad(x * 360))
+end
+
+-- base1 modulo
+local function mod1(v, m)
+  return ((v - 1) % m) + 1
+end
+
+function bpm_to_fps(v)
+  return v / 60
+end
+
+function fps_to_bpm(v)
+  return v * 60
+end
 
 
 -- ------------------------------------------------------------------------
@@ -218,13 +268,13 @@ local RND_SAMPLE_FOLDERS = {
   "blips/*",
 }
 
-found_sample_kits = {}
-found_sample_kits_samples = {}
-found_samples = {}
-nb_found_sample_kits = 0
-nb_found_sample_kits_samples = {}
-nb_found_samples = 0
-last_sample_scan_ts = 0
+local found_sample_kits = {}
+local found_sample_kits_samples = {}
+local found_samples = {}
+local nb_found_sample_kits = 0
+local nb_found_sample_kits_samples = {}
+local nb_found_samples = 0
+local last_sample_scan_ts = 0
 
 -- basically `util.scandir` but only for subfolders
 local function scandirdir(directory)
@@ -257,46 +307,90 @@ function rescan_samples()
   last_sample_scan_ts = os.time()
 end
 
+local function is_any_ring_outmode_sample()
+  for r=1,ARCS do
+    if params:string("ring_out_mode_"..r) == "sample" then
+      return true
+    end
+  end
+  return false
+end
+
+
 -- ------------------------------------------------------------------------
--- core helpers
+-- oilcan kits
 
-local function rnd(x)
-  if x == 0 then
-    return 0
+local OILKITS_DIR = _path.data.."oilcan/"
+found_oilkits = {}
+nb_found_oilkits = 0
+local last_oilkit_scan_ts = 0
+
+local function is_ring_outmode_oilcan(r)
+  return (params:string("ring_out_mode_"..r) == "nb"
+    and util.string_starts(params:string("ring_out_nb_voice_"..r), "Oilcan "))
+end
+
+local function is_any_ring_outmode_oilcan()
+  for r=1,ARCS do
+    if is_ring_outmode_oilcan(r) then
+      return true
+    end
   end
-  if (not x) then
-    x = 1
+  return false
+end
+
+function rescan_oilkits()
+  found_oilkits = util.scandir(OILKITS_DIR)
+  nb_found_oilkits = tab.count(found_oilkits)
+  -- TODO: only keep those ending in .oilkit
+
+  if nb_found_oilkits == 0 then
+    print("no Oilcan kit found!")
+    return
   end
-  x = x * 100000
-  x = math.random(x) / 100000
-  return x
+
+  last_oilkit_scan_ts = os.time()
 end
 
-local function srand(x)
-  if not x then
-    x = 0
+local function get_oilcan_voice_param_option_id(r, voice_id)
+  local nb_voices = params:lookup_param("ring_out_nb_voice_"..r).options
+  return tab.key(nb_voices, "Oilcan "..voice_id)
+end
+
+local function reset_all_rings_oilcan_voice(force)
+  if force == nil then
+    force = false
   end
-  math.randomseed(x)
+
+  if not mod.is_loaded('oilcan') then
+    return
+  end
+
+  if os.time() - last_oilkit_scan_ts > 60 then
+    rescan_oilkits()
+  end
+
+  for r=1,ARCS do
+    local do_set_ring = false
+    if force then
+      do_set_ring = (params:string("ring_out_mode_"..r) == "nb")
+    else
+      do_set_ring = is_ring_outmode_oilcan(r)
+    end
+
+    if do_set_ring then
+      params:set("ring_out_nb_voice_"..r, get_oilcan_voice_param_option_id(r, r))
+      params:set("oilcan_target_file_"..r, OILKITS_DIR..found_oilkits[mod1(r, nb_found_oilkits)])
+    end
+  end
 end
 
-function round(v)
-  return math.floor(v+0.5)
-end
-
-local function cos(x)
-  return math.cos(math.rad(x * 360))
-end
-
-local function sin(x)
-  return -math.sin(math.rad(x * 360))
-end
-
-function bpm_to_fps(v)
-  return v / 60
-end
-
-function fps_to_bpm(v)
-  return v * 60
+local function assign_all_rings_oilkit(kit_id)
+  for r=1,ARCS do
+    if is_ring_outmode_oilcan(r) then
+      params:set("ring_out_nb_voice_"..r, get_oilcan_voice_param_option_id(r, r))
+    end
+  end
 end
 
 
@@ -417,6 +511,8 @@ params.action_delete = function(filename, name, pset_number)
 	os.execute("rm -f" .. filename .. ".argenseqs")
 end
 
+
+
 function init()
   screen.aa(1)
   screen.line_width(1)
@@ -440,6 +536,25 @@ function init()
 
   params:add_option("gen_all_mode", "Randomize Mode", RANDOMIZE_MODES)
 
+  params:add_trigger("all_oilcan", "Init All Oilcan")
+  params:set_action("all_oilcan",
+                    function(v)
+                        if not mod.is_loaded('oilcan') then
+                          return
+                        end
+                        for r=1,ARCS do
+                          params:set("ring_out_mode_"..r, tab.key(OUT_VOICE_MODES, "nb"))
+                        end
+                        reset_all_rings_oilcan_voice(true)
+  end)
+  params:add_trigger("all_sample", "Init All Sample")
+  params:set_action("all_sample",
+                    function(v)
+                      for r=1,ARCS do
+                        params:set("ring_out_mode_"..r, tab.key(OUT_VOICE_MODES, "sample"))
+                      end
+  end)
+
   params:add_trigger("gen_all", "Randomize")
   params:set_action("gen_all",
                     function(v)
@@ -454,12 +569,33 @@ function init()
 
                       local kit
                       if params:string("gen_all_mode") == "ptrn+kit" then
-                        kit = found_sample_kits[math.random(nb_found_sample_kits)]
-                        print("Loading sample kit: "..kit)
+                        if is_any_ring_outmode_sample() then
+                          kit = found_sample_kits[math.random(nb_found_sample_kits)]
+                          print("Loading sample kit: "..kit)
+                        elseif is_any_ring_outmode_oilcan() then
+                          reset_all_rings_oilcan_voice()
+                          local kit_id = math.random(nb_found_oilkits)
+                          kit = found_oilkits[kit_id]
+                          assign_all_rings_oilkit(nb_found_oilkits)
+                          print("Loading oilkit: "..kit)
+                        end
+                      elseif params:string("gen_all_mode") == "ptrn+smpl" then
+                        if is_any_ring_outmode_sample() then
+                          reset_all_rings_oilcan_voice()
+                        end
                       end
 
 
                       for r=1,ARCS do
+                        -- reset individual ring params
+
+                        params:set("ring_pattern_shift_"..r, 0)
+
+                        if params:string("ring_out_mode_"..r) == "sample" then
+                          params:set('transpose_'..r, params:get('transpose'))
+                        end
+
+                        -- and randomize others
                         params:set("ring_gen_pattern_"..r, 1)
                         local density = DENSITY_MAX
                         for try=1,math.floor(DENSITY_MAX/2) do
@@ -469,14 +605,21 @@ function init()
                           end
                         end
                         params:set("ring_density_"..r, density)
-                        params:set("ring_pattern_shift_"..r, 0)
 
                         if params:string("gen_all_mode") == "ptrn+kit" then
-                          local si = math.random(nb_found_sample_kits_samples[kit])
-                          Timber.load_sample(r, found_sample_kits_samples[kit][si])
+                          if params:string("ring_out_mode_"..r) == "sample" then
+                            local si = math.random(nb_found_sample_kits_samples[kit])
+                            Timber.load_sample(r, found_sample_kits_samples[kit][si])
+                          elseif is_ring_outmode_oilcan(r) then
+                            params:set("ring_out_nb_note_"..r, math.random(8))
+                          end
                         elseif params:string("gen_all_mode") == "ptrn+smpl" then
-                          local si = math.random(nb_found_samples)
-                          Timber.load_sample(r, found_samples[si])
+                          if params:string("ring_out_mode_"..r) == "sample" then
+                            local si = math.random(nb_found_samples)
+                            Timber.load_sample(r, found_samples[si])
+                          elseif is_ring_outmode_oilcan(r) then
+                            params:set("ring_out_nb_note_"..r, math.random(8))
+                          end
                         end
                       end
 
@@ -559,8 +702,6 @@ function init()
   end
 
 
-  nb:add_player_params()
-
   params:add{type = "control", id = "filter_freq", name = "Filter Cutoff", controlspec = ControlSpec.new(60, 20000, "exp", 0, 3000, "Hz"), formatter = Formatters.format_freq, action = function(v)
                for r=1,ARCS do
                  params:set('filter_freq_'..r, v)
@@ -579,6 +720,10 @@ function init()
                  params:set('transpose_'..r, params:get('transpose_'..r) + delta)
                end
   end}
+
+  nb:add_player_params()
+
+  params:add_group("Global Transport", 4)
 
   params:add_option("midi_transport_in", "MIDI Transport IN ", OFF_ON)
   params:set_action("midi_transport_in",
@@ -629,12 +774,18 @@ function init()
     --params:set('amp_env_sustain_' .. i, 0)
   end
 
+  -- --------------------------------
+
   Timber.load_sample(1, _path.audio .. 'common/808/808-BD.wav')
   Timber.load_sample(2, _path.audio .. 'common/808/808-CH.wav')
   -- Timber.load_sample(2, _path.audio .. 'common/808/808-CY.wav')
   -- Timber.load_sample(2, _path.audio .. 'common/808/808-RS.wav')
   Timber.load_sample(3, _path.audio .. 'common/808/808-SD.wav')
   Timber.load_sample(4, _path.audio .. 'common/808/808-OH.wav')
+
+  reset_all_rings_oilcan_voice()
+
+-- --------------------------------
 
   redraw_clock = clock.run(
     function()
