@@ -1,13 +1,24 @@
 -- argen. sample
 
+local ControlSpec = require "controlspec"
+local Formatters = require "formatters"
+
 local MusicUtil = require "musicutil"
+
 local Timber = include("timber/lib/timber_engine")
+
 include("argen/lib/core")
 
 
 -- ------------------------------------------------------------------------
 
 local sample = {}
+
+
+-- ------------------------------------------------------------------------
+-- state - global control
+
+local prev_global_transpose = 0
 
 
 -- ------------------------------------------------------------------------
@@ -103,6 +114,20 @@ function sample.init_global_params(nb_arcs)
                end
   end}
 end
+
+function sample.global_pitch_transpose_delta(nb_arcs, d)
+  if any_grid_hot_cursor and not grid_all_rings then
+    for r=1,nb_arcs do
+      if grid_hot_cursors[r] then
+        params:set('transpose_'..r, params:get('transpose_'..r) + d)
+      end
+    end
+  else
+    prev_global_transpose = params:get("transpose")
+    params:set("transpose", params:get("transpose") + d)
+  end
+end
+
 
 function sample.init_params(nb_slots)
   Timber.options.PLAY_MODE_BUFFER_DEFAULT = 4

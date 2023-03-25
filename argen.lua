@@ -52,6 +52,7 @@ local Formatters = require "formatters"
 
 local nb = include("argen/lib/nb/lib/nb")
 
+local playback = include("argen/lib/playback")
 local sample = include("argen/lib/sample")
 local oilcan = include("argen/lib/oilcan")
 
@@ -62,8 +63,6 @@ include("argen/lib/core")
 -- engine
 
 engine.name = "Timber"
-local Timber = include("timber/lib/timber_engine")
-
 
 
 -- ------------------------------------------------------------------------
@@ -79,11 +78,9 @@ local SCREEN_H = 64
 local SCREEN_W = 128
 
 local MAX_ARCS = 16
-
-local INIT_POS = 1
-
 -- local ARCS = 8
 local ARCS = 4
+
 local ARC_SEGMENTS = 64
 
 local DENSITY_MAX = 10
@@ -93,8 +90,8 @@ local MAX_BPM = 2000
 
 local FAST_FIRING_DELTA = 0.02
 
-local STARTED = "started"
-local PAUSED = "paused"
+local is_firing = {}
+local last_firing = {}
 
 
 -- ------------------------------------------------------------------------
@@ -102,12 +99,11 @@ local PAUSED = "paused"
 
 local a = nil
 local g = nil
-local midi_in_transport = nil
-local midi_out_transport = nil
 
 local SCREEN_CURSOR_LEN = 2
 local screen_cursor = 1
 local grid_cursor = 1
+local play_btn_on = false
 
 local has_arc = false
 local has_grid = false
@@ -130,88 +126,10 @@ local prev_pattern_refresh_t = {}
 local grid_shift = false
 local shift_quant = 1
 
-local prev_global_transpose = 0
-
 local NB_PATTERNS = 4
 local NB_RECALLS = 4
 local recalls = {}
 local patterns = {}
-
-
--- ------------------------------------------------------------------------
--- state - playback
-
-local pos_quant = INIT_POS
-local unquantized_rot_pos = {}
-
-local is_firing = {}
-local last_firing = {}
-
-local mutes = {}
-
-local playback_status = STARTED
-play_btn_on = false
-local was_stopped = false
-
-local function reset_playback_heads()
-  pos_quant = INIT_POS
-  for r=1,ARCS do
-    unquantized_rot_pos[r] = INIT_POS
-  end
-end
-
-local function stop_playback(is_originator)
-    if is_originator == true and midi_out_transport ~= nil and params:string("midi_transport_in") == "on" then
-    midi_out_transport:stop()
-  end
-  reset_playback_heads()
-  playback_status = PAUSED
-  was_stopped = true
-end
-
-local function pause_playback(is_originator)
-  if is_originator == true and midi_out_transport ~= nil and params:string("midi_transport_in") == "on" then
-    midi_out_transport:stop()
-  end
-  playback_status = PAUSED
-end
-
-local function start_playback(is_originator)
-  if is_originator == true and midi_out_transport ~= nil and params:string("midi_transport_in") == "on" then
-    if was_stopped then
-      midi_out_transport:start()
-    else
-      midi_out_transport:continue()
-    end
-  end
-  playback_status = STARTED
-  was_stopped = false
-end
-
-local function restart_playback(is_originator)
-  if is_originator == true and midi_out_transport ~= nil and params:string("midi_transport_in") == "on" then
-    midi_out_transport:start()
-  end
-  reset_playback_heads()
-  playback_status = STARTED
-end
-
-local function midi_in_transport_event(data)
-  if params:string("midi_transport_in") == "off" then
-    return
-  end
-
-  local msg = midi.to_msg(data)
-
-  if msg.type == "start" then
-    stop_playback()
-    start_playback()
-  elseif msg.type == "stop" then
-    pause_playback()
-  elseif msg.type == "continue" then
-    start_playback()
-  end
-end
 
 
 -- ------------------------------------------------------------------------
@@ -341,15 +259,13 @@ function init()
 
   grid_connect_maybe()
   arc_connect_maybe()
-  midi_in_transport = midi.connect(1)
-  midi_in_transport.event = midi_in_transport_event
 
   local OUT_VOICE_MODES = {"sample", "nb"}
   local RANDOMIZE_MODES = {"ptrn", "ptrn+kit", "ptrn+smpl"}
   local ON_OFF = {"on", "off"}
   local OFF_ON = {"off", "on"}
 
-  nb.voice_count = 4
+  nb.voice_count = ARCS
   nb:init()
 
   params:add_option("flash", "Animation Flash", OFF_ON)
@@ -448,15 +364,20 @@ function init()
                     -- end
   end)
 
+  playback.init(ARCS)
+  playback.reset_heads()
+
   for r=1,ARCS do
+    grid_hot_cursors[r] = false
+
     patterns[r] = gen_pattern()
     sparse_patterns[r] = gen_empty_pattern()
     raw_densities[r] = 0
     prev_pattern_refresh_t[r] = 0
+
     is_firing[r] = false
     last_firing[r] = 0.0
-    mutes[r] = false
-    grid_hot_cursors[r] = false
+
     params:add_group("Ring " .. r, 11)
 
     params:add_trigger("ring_gen_pattern_"..r, "Generate "..r)
@@ -464,7 +385,6 @@ function init()
                       function(v)
                       gen_ring_pattern(r)
     end)
-    reset_playback_heads()
 
 
     params:add{type = "number", id = "ring_density_"..r, name = "Density "..r, min = 0, max = DENSITY_MAX, default = 0}
@@ -484,7 +404,7 @@ function init()
                         if ON_OFF[v] == "on" then
                           params:hide("ring_bpm_"..r)
                         else
-                          unquantized_rot_pos[r] = pos_quant
+                          playback.sync_ring_unquant_head(r)
                           params:set("ring_bpm_"..r, params:get("clock_tempo"))
                           params:show("ring_bpm_"..r)
                         end
@@ -527,42 +447,7 @@ function init()
 
   nb:add_player_params()
 
-  params:add_group("Global Transport", 4)
-
-  params:add_option("midi_transport_in", "MIDI Transport IN ", OFF_ON)
-  params:set_action("midi_transport_in",
-                    function(v)
-                      if OFF_ON[v] == "on" then
-                        params:show("midi_transport_in_device")
-                      else
-                        params:hide("midi_transport_in_device")
-                      end
-                      _menu.rebuild_params()
-                    end
-  )
-
-  params:add{type = "number", id = "midi_transport_in_device", name = "MIDI Transport IN Dev", min = 1, max = 16, default = 1, action = function(value)
-               midi_in_transport.event = nil
-               midi_in_transport = midi.connect(value)
-               midi_in_transport.event = midi_in_transport_event
-  end}
-
-  params:add_option("midi_transport_out", "MIDI Transport OUT ", OFF_ON)
-  params:set_action("midi_transport_out",
-                    function(v)
-                      if OFF_ON[v] == "on" then
-                        params:show("midi_transport_out_device")
-                      else
-                        params:hide("midi_transport_out_device")
-                      end
-                      _menu.rebuild_params()
-                    end
-  )
-
-  params:add{type = "number", id = "midi_transport_out_device", name = "MIDI Transport OUT Dev", min = 1, max = 16, default = 1, action = function(value)
-               midi_out_transport = midi.connect(value)
-  end}
-
+  playback.init_transport()
 
   sample.init_params(ARCS)
 
@@ -663,14 +548,11 @@ function pos_2_radial_pos(pos, shift, i)
 end
 
 function arc_quantized_trigger()
-  if playback_status == PAUSED then
+  if playback.is_paused_or_stopepd() then
     return
   end
 
-  pos_quant = pos_quant + 1
-  if pos_quant > ARC_SEGMENTS then
-      pos_quant = pos_quant % ARC_SEGMENTS
-  end
+  playback.quant_head_advance(ARC_SEGMENTS)
 
   for r=1,ARCS do
     if params:string("ring_quantize_"..r) == "on" then
@@ -680,10 +562,12 @@ function arc_quantized_trigger()
         -- while radial_pos < 0 do
         --   radial_pos = radial_pos + ARC_SEGMENTS
         -- end
-        local radial_pos = pos_2_radial_pos(pos_quant, params:get("ring_pattern_shift_"..r), i)
+
+        -- local radial_pos = playback.quant_head_2_radial_pos
+        local radial_pos = playback.quant_head_2_radial_pos(ARC_SEGMENTS, params:get("ring_pattern_shift_"..r), i)
 
         if v == 1 then
-          if radial_pos % ARC_SEGMENTS == 1 and not mutes[r] then
+          if radial_pos % ARC_SEGMENTS == 1 and not playback.is_ring_muted(r) then
             note_trigger(r)
             is_firing[r] = true
             last_firing[r] = os.clock()
@@ -695,33 +579,37 @@ function arc_quantized_trigger()
 end
 
 function arc_unquantized_trigger()
-  if playback_status == PAUSED then
+  if playback.is_paused_or_stopepd() then
     return
   end
 
   for r=1,ARCS do
     if params:string("ring_quantize_"..r) == "off" then
-      local prev_unquantized_rot_pos = unquantized_rot_pos[r]
       is_firing[r] = false
+
+      local prev_pos = playback.ring_head_pos(r)
+
       local bpm = params:get("ring_bpm_"..r)
       local step = bpm / UNQUANTIZED_SAMPLES
       step = step / 8
-      unquantized_rot_pos[r] = (unquantized_rot_pos[r] + step) % ARC_SEGMENTS
+      playback.unquant_head_advance(r, step, ARC_SEGMENTS)
 
-      if math.floor(unquantized_rot_pos[r]) == math.floor(prev_unquantized_rot_pos) then
+      local pos = playback.ring_head_pos(r)
+
+      if math.floor(pos) == math.floor(prev_pos) then
         goto NEXT
       end
 
       for i, v in ipairs(sparse_patterns[r]) do
-        local radial_pos = (i + round(unquantized_rot_pos[r])) + params:get("ring_pattern_shift_"..r)
+        local radial_pos = (i + round(pos)) + params:get("ring_pattern_shift_"..r)
         while radial_pos < 0 do
           radial_pos = radial_pos + ARC_SEGMENTS
         end
 
         if v == 1 then
-          if radial_pos % ARC_SEGMENTS == 1 and not mutes[r] then
-            is_firing[r] = true
+          if radial_pos % ARC_SEGMENTS == 1 and not playback.is_ring_muted(r) then
             note_trigger(r)
+            is_firing[r] = true
             last_firing[r] = os.clock()
           end
         end
@@ -739,24 +627,7 @@ function arc_redraw()
 
   for r=1,ARCS do
 
-    local display_pos = 1
-
-    if params:string("ring_quantize_"..r) == "on" then
-      display_pos = pos_quant
-
-      -- NB: this kinda works but is imprecise
-      -- local step = (params:get("clock_tempo") * 2) / fps_to_bpm(ARC_FPS)
-    else
-      -- TODO: redo this
-      -- local bpm_ratio = params:get("ring_bpm_"..r) / fps_to_bpm(ARC_FPS)
-      -- local step = bpm_ratio
-      -- local display_pos = pos_quant + step
-      -- if display_pos > ARC_SEGMENTS then
-      --   display_pos = display_pos % ARC_SEGMENTS
-      -- end
-
-      display_pos = round(unquantized_rot_pos[r])
-    end
+    local display_pos = playback.ring_head_pos(r)
 
     for i, v in ipairs(sparse_patterns[r]) do
       local radial_pos = (i + display_pos) + params:get("ring_pattern_shift_"..r)
@@ -807,12 +678,7 @@ function grid_redraw()
 
   local r = grid_cursor
 
-  local pos
-  if params:string("ring_quantize_"..r) == "on"  then
-    pos = pos_quant
-  else
-    pos = round(unquantized_rot_pos[r])
-  end
+  local pos = playback.ring_head_pos(r)
 
   for x=1, math.min(g.cols, 8) do
     for y=1, g.rows do
@@ -855,13 +721,13 @@ function grid_redraw()
 
     -- stop / pause / start
     l = 2
-    if playback_status == STARTED then l = 5 end
+    if playback.is_running() then l = 5 end
     g:led(13, 5, l) -- start
     l = 2
-    if playback_status == PAUSED and not was_stopped then l = 5 end
+    if playback.is_paused() then l = 5 end
     g:led(14, 5, l) -- pause
     l = 2
-    if playback_status == PAUSED and was_stopped then l = 5 end
+    if playback.is_stopped() then l = 5 end
     g:led(15, 5, l) -- stop
 
     -- ring select
@@ -889,6 +755,7 @@ function grid_redraw()
 
   g:refresh()
 end
+
 
 function grid_key(x, y, z)
   local r = grid_cursor
@@ -960,15 +827,15 @@ function grid_key(x, y, z)
     play_btn_on = (z >= 1)
 
     if play_btn_on then
-      start_playback(true)
+      playback.start(true)
     end
   elseif x == 14 and y == 5 and (z >= 1)then
-    pause_playback(true)
+    playback.pause(true)
   elseif x == 15 and y == 5 and (z >= 1) then
     if play_btn_on then
-      restart_playback(true)
+      playback.restart(true)
     else
-      stop_playback(true)
+      playback.stop(true)
     end
   end
 
@@ -1018,9 +885,9 @@ function grid_key(x, y, z)
   end
 
   for r=1,ARCS do
-    mutes[r] = false
+    playback.unmute_ring(r)
     if play_btn_on and (grid_all_rings or grid_hot_cursors[r]) then
-      mutes[r] = true
+      playback.mute_ring(r)
     end
   end
 
@@ -1074,19 +941,6 @@ function key(n, v)
 
 end
 
-function pitch_transpose_delta(d)
-  if any_grid_hot_cursor and not grid_all_rings then
-    for r=1,ARCS do
-      if grid_hot_cursors[r] then
-        params:set('transpose_'..r, params:get('transpose_'..r) + d)
-      end
-    end
-  else
-    prev_global_transpose = params:get("transpose")
-    params:set("transpose", params:get("transpose") + d)
-  end
-end
-
 function enc_no_arc(r, d)
   grid_cursor = r
 
@@ -1135,7 +989,7 @@ function enc(n, d)
   if n == 2 then
     if not has_arc then
       if k1 then
-        pitch_transpose_delta(d)
+        sample.global_pitch_transpose_delta(ARCS, d)
       else
         local has_effect = enc_no_arc(screen_cursor, d)
         if has_effect then
@@ -1143,7 +997,7 @@ function enc(n, d)
         end
       end
     else
-      pitch_transpose_delta(d)
+      sample.global_pitch_transpose_delta(ARCS, d)
     end
     return
   end
@@ -1270,7 +1124,7 @@ function redraw()
       radius2 = radius / 3
     end
 
-    if mutes[r] then
+    if playback.is_ring_muted(r) then
       screen.level(5)
     else
       screen.level(15)
@@ -1314,23 +1168,7 @@ function redraw()
 
     for i=1,ARC_SEGMENTS do
 
-      if params:string("ring_quantize_"..r) == "on" then
-        display_pos = pos_quant
-
-        -- NB: this kinda works but is imprecise
-        -- local step = (params:get("clock_tempo") * 2) / fps_to_bpm(FPS)
-      else
-        -- TODO: redo this
-        -- local bpm_ratio = params:get("ring_bpm_"..r) / fps_to_bpm(FPS)
-        -- local step = bpm_ratio
-        -- local display_pos = pos_quant + step
-        -- if display_pos > ARC_SEGMENTS then
-        --   display_pos = display_pos % ARC_SEGMENTS
-        -- end
-
-        display_pos = round(unquantized_rot_pos[r])
-
-      end
+      local display_pos = playback.ring_head_pos(r)
 
       if sparse_patterns[r][i] == 1 then
         local radial_pos = (i + display_pos) + params:get("ring_pattern_shift_"..r) + (ARC_SEGMENTS/4)
@@ -1338,7 +1176,7 @@ function redraw()
           radial_pos = radial_pos + ARC_SEGMENTS
         end
 
-        if mutes[r] then
+        if playback.is_ring_muted(r) then
           screen.level(5)
         else
           screen.level(15)
