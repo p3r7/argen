@@ -23,9 +23,6 @@ end
 -- single ring hot cursor
 
 local grid_hot_cursors = {}
-local any_grid_hot_cursor = false
-hot_cursor.nb = 0
-
 
 function hot_cursor.is(r)
   return grid_hot_cursors[r]
@@ -39,6 +36,9 @@ end
 -- ------------------------------------------------------------------------
 -- combined state
 
+local any_grid_hot_cursor = false
+local nb_hot_cursor = 0
+
 function hot_cursor.is_active(r)
   return (hot_cursor.are_all() or hot_cursor.is(r))
 end
@@ -47,7 +47,7 @@ function hot_cursor.is_any_active()
   return any_grid_hot_cursor
 end
 
-function hot_cursor.recompute()
+function hot_cursor.recompute(force_all)
   local nb_arcs = tab.count(grid_hot_cursors)
   local nb_hot_cursor = 0
   for r=1,nb_arcs do
@@ -56,7 +56,10 @@ function hot_cursor.recompute()
     end
   end
   any_grid_hot_cursor = (nb_hot_cursor > 0)
-  hot_cursor.nb = nb_hot_cursor
+  nb_hot_cursor = nb_hot_cursor
+
+  local grid_all_hot_pressed = (nb_hot_cursor == nb_arcs)
+  grid_all_rings = (force_all or grid_all_hot_pressed)
 end
 
 

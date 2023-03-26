@@ -852,7 +852,7 @@ function grid_key(x, y, z)
       is_curr_key_cursor_sel = true
       local pressed = (z >= 1)
       if pressed then
-        if not any_grid_hot_cursor then
+        if not hot_cursor.is_any_active() then
           grid_cursor = r
         end
       end
@@ -861,10 +861,7 @@ function grid_key(x, y, z)
   end
 
   -- recompute global state
-  hot_cursor.recompute()
-  local grid_all_hot_pressed = (hot_cursor.nb == ARCS)
-  -- FIXME: dirty code?
-  hot_cursor.all_set(grid_all_rings_btn or grid_all_hot_pressed)
+  hot_cursor.recompute(grid_all_rings_btn)
 
   for r=1,ARCS do
     playback.unmute_ring(r)
