@@ -53,6 +53,7 @@ local Formatters = require "formatters"
 local nb = include("argen/lib/nb/lib/nb")
 
 hot_cursor = include("argen/lib/hot_cursor")
+local varc = include("argen/lib/varc")
 local playback = include("argen/lib/playback")
 local sample = include("argen/lib/sample")
 local oilcan = include("argen/lib/oilcan")
@@ -71,6 +72,7 @@ engine.name = "Timber"
 
 local FPS = 15
 local ARC_FPS = 15
+local VARC_RADIUS = 11
 local GRID_FPS = 15
 local ARC_REFRESH_SAMPLES = 10
 local UNQUANTIZED_SAMPLES = 128
@@ -1071,7 +1073,6 @@ function redraw()
   screen.move(95, 16)
   screen.text("Q: "..params:get("filter_resonance"))
 
-  local radius = 11
   local MAX_ARCS_PER_LINE = 8
   for r=1,ARCS do
 
@@ -1098,24 +1099,21 @@ function redraw()
 
     local x = SCREEN_W/nb_arcs_in_col * r2 - 2 * 3/nb_arcs_in_col * radius
 
-    local radius2 = radius
+    local radius = VARC_RADIUS
     if os.time() - prev_pattern_refresh_t[r] < 1 then
-      radius2 = radius / 3
+      radius = VARC_RADIUS / 3
     end
 
+    local level = 15
     if playback.is_ring_muted(r) then
-      screen.level(5)
-    else
-      screen.level(15)
+      level = 5
     end
 
-    screen.move(x + radius2, y)
-    screen.circle(x, y, radius2)
-    if (is_firing[r] or math.abs(os.clock() - last_firing[r]) < FAST_FIRING_DELTA) and params:string("flash") == "on" then
-      screen.fill()
-    else
-      screen.stroke()
-    end
+    local fill = ((is_firing[r] or math.abs(os.clock() - last_firing[r]) < FAST_FIRING_DELTA) and params:string("flash") == "on")
+
+    local offset = playback.ring_head_pos(r) + params:get("ring_pattern_shift_"..r)
+
+    varc.redraw(x, y, radius2, level, fill, sparse_patterns[r], offset)
 
     if params:string("ring_quantize_"..r) == "off" then
       screen.pixel(x, y)
@@ -1145,28 +1143,7 @@ function redraw()
     screen.line_width(1)
     screen.level(15)
 
-    for i=1,ARC_SEGMENTS do
-
-      local display_pos = playback.ring_head_pos(r)
-
-      if sparse_patterns[r][i] == 1 then
-        local radial_pos = (i + display_pos) + params:get("ring_pattern_shift_"..r) + (ARC_SEGMENTS/4)
-        while radial_pos < 0 do
-          radial_pos = radial_pos + ARC_SEGMENTS
-        end
-
-        if playback.is_ring_muted(r) then
-          screen.level(5)
-        else
-          screen.level(15)
-        end
-
-        screen.pixel(x + (radius + 4) * cos(radial_pos/ARC_SEGMENTS) * -1, y + (radius + 4) * sin(radial_pos/ARC_SEGMENTS))
-
-        screen.level(15)
-      end
-    end
-
+    local display_pos = playback.ring_head_pos(r)
   end
 
   screen.update()
