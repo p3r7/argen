@@ -148,7 +148,7 @@ function playback.restart(is_originator)
   if is_originator == true and midi_out_transport ~= nil and params:string("midi_transport_in") == "on" then
     midi_out_transport:start()
   end
-  reset_playback_heads()
+  playback.reset_heads()
   playback_status = STARTED
 end
 
