@@ -52,6 +52,7 @@ local Formatters = require "formatters"
 
 local nb = include("argen/lib/nb/lib/nb")
 
+hot_cursor = include("argen/lib/hot_cursor")
 local playback = include("argen/lib/playback")
 local sample = include("argen/lib/sample")
 local oilcan = include("argen/lib/oilcan")
@@ -108,10 +109,7 @@ local play_btn_on = false
 local has_arc = false
 local has_grid = false
 
-grid_all_rings = false
 grid_all_rings_btn = false
-local grid_hot_cursors = {}
-any_grid_hot_cursor = false
 
 local s_lattice
 
@@ -366,10 +364,9 @@ function init()
 
   playback.init(ARCS)
   playback.reset_heads()
+  hot_cursor.init(ARCS)
 
   for r=1,ARCS do
-    grid_hot_cursors[r] = false
-
     patterns[r] = gen_pattern()
     sparse_patterns[r] = gen_empty_pattern()
     raw_densities[r] = 0
@@ -733,7 +730,7 @@ function grid_redraw()
     -- ring select
     --  - all
     l = 3
-    if grid_all_rings then l = 5 end
+    if hot_cursor.are_all() then l = 5 end
     g:led(9, 7, l)
     --  - independant
     local x_start = 11
@@ -741,12 +738,12 @@ function grid_redraw()
       local x = x_start + r - 1
       local l = 2
       if grid_cursor == r then
-        if grid_hot_cursors[r] or grid_all_rings then
+        if hot_cursor.is_active(r) then
           l = 10
         else
           l = 5
         end
-      elseif grid_hot_cursors[r] or grid_all_rings then
+      elseif hot_cursor.is_active(r) then
         l = 4
       end
       g:led(x, 7, l)
@@ -859,34 +856,19 @@ function grid_key(x, y, z)
           grid_cursor = r
         end
       end
-      grid_hot_cursors[r] = pressed
+      hot_cursor.set(r, pressed)
     end
   end
 
   -- recompute global state
-
-  local grid_all_hot_pressed = false
-  local nb_hot_cursor = 0
-  for r=1,ARCS do
-    if grid_hot_cursors[r] then
-      nb_hot_cursor = nb_hot_cursor + 1
-    end
-  end
-  any_grid_hot_cursor = (nb_hot_cursor > 0)
-  if nb_hot_cursor == ARCS then
-    grid_all_hot_pressed = true
-  end
-
-  -- FIXME: dirty code
-  if grid_all_rings_btn or grid_all_hot_pressed then
-    grid_all_rings = true
-  else
-    grid_all_rings = false
-  end
+  hot_cursor.recompute()
+  local grid_all_hot_pressed = (hot_cursor.nb == ARCS)
+  -- FIXME: dirty code?
+  hot_cursor.all_set(grid_all_rings_btn or grid_all_hot_pressed)
 
   for r=1,ARCS do
     playback.unmute_ring(r)
-    if play_btn_on and (grid_all_rings or grid_hot_cursors[r]) then
+    if play_btn_on and hot_cursor.is_active(r) then
       playback.mute_ring(r)
     end
   end
@@ -1063,7 +1045,7 @@ arc_delta_single = function(r, d)
 end
 
 arc_delta = function(r, d)
-  if grid_all_rings then
+  if hot_cursor.are_all() then
     for r=1,ARCS do
       arc_delta_single(r, d)
     end

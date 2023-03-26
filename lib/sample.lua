@@ -7,6 +7,7 @@ local MusicUtil = require "musicutil"
 
 local Timber = include("timber/lib/timber_engine")
 
+hot_cursor = include("argen/lib/hot_cursor")
 include("argen/lib/core")
 
 
@@ -116,9 +117,9 @@ function sample.init_global_params(nb_arcs)
 end
 
 function sample.global_pitch_transpose_delta(nb_arcs, d)
-  if any_grid_hot_cursor and not grid_all_rings then
+  if hot_cursor.is_any_active() and not hot_cursor.are_all() then
     for r=1,nb_arcs do
-      if grid_hot_cursors[r] then
+      if hot_cursor.is_active(r) then
         params:set('transpose_'..r, params:get('transpose_'..r) + d)
       end
     end
