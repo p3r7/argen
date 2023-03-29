@@ -740,9 +740,21 @@ function grid_key(x, y, z)
   end
 
   if x == 13 and y == 2 and z >= 1 then
-    params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) - 1 * shift_quant) % ARC_SEGMENTS)
+    if hot_cursor.are_all() then
+      for r2=1,ARCS do
+        params:set("ring_pattern_shift_"..r2, math.floor(params:get("ring_pattern_shift_"..r2) - 1 * shift_quant) % ARC_SEGMENTS)
+      end
+    else
+      params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) - 1 * shift_quant) % ARC_SEGMENTS)
+    end
   elseif x == 15 and y == 2 and z >= 1 then
-    params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + 1 * shift_quant) % ARC_SEGMENTS)
+    if hot_cursor.are_all() then
+      for r2=1,ARCS do
+        params:set("ring_pattern_shift_"..r2, math.floor(params:get("ring_pattern_shift_"..r2) + 1 * shift_quant) % ARC_SEGMENTS)
+      end
+    else
+      params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + 1 * shift_quant) % ARC_SEGMENTS)
+    end
   end
 
   -- start/pause/stop
