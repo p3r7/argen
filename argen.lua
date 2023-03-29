@@ -683,7 +683,7 @@ function grid_redraw()
     for y=1, g.rows do
       local i_head = x + ((y-1) * 8)
       local i = ARC_SEGMENTS - i_head
-      i = (i - params:get("ring_pattern_shift_"..r)) % 64
+      i = mod1(i - params:get("ring_pattern_shift_"..r), 64)
       while i < 0 do
         i = i + ARC_SEGMENTS
       end
@@ -765,7 +765,7 @@ function grid_key(x, y, z)
   if x <= math.min(g.cols, 8) then
     if z >= 1 then
       local i = ARC_SEGMENTS - (x + ((y-1) * 8))
-      i = (i - params:get("ring_pattern_shift_"..r)) % 64
+      i = mod1(i - params:get("ring_pattern_shift_"..r), 64)
 
       local v = sparse_patterns[r][i]
       if v == 1 then
