@@ -53,6 +53,7 @@ local Formatters = require "formatters"
 local nb = include("argen/lib/nb/lib/nb")
 
 hot_cursor = include("argen/lib/hot_cursor")
+local pattern = include("argen/lib/pattern")
 local varc = include("argen/lib/varc")
 local playback = include("argen/lib/playback")
 local sample = include("argen/lib/sample")
@@ -86,9 +87,6 @@ local ARCS = 4
 
 local ARC_SEGMENTS = 64
 
-local DENSITY_MAX = 10
-local ARC_RAW_DENSITY_RESOLUTION = 1000
-
 local MAX_BPM = 2000
 
 local FAST_FIRING_DELTA = 0.02
@@ -115,13 +113,7 @@ grid_all_rings_btn = false
 
 local s_lattice
 
-local patterns = {}
-local sparse_patterns = {}
-
--- NB: hisher resolution ring density values when setting via arc
-local raw_densities = {}
-
-local prev_pattern_refresh_t = {}
+-- NB: higher resolution ring density values when setting via arc
 
 local grid_shift = false
 local shift_quant = 1
@@ -129,54 +121,7 @@ local shift_quant = 1
 local NB_PATTERNS = 4
 local NB_RECALLS = 4
 local recalls = {}
-local patterns = {}
-
-
--- ------------------------------------------------------------------------
--- patterns
-
-function gen_pattern(pattern)
-  if pattern == nil then
-    pattern = {}
-  end
-
-  srand(math.random(10000))
-
-  for i=1,ARC_SEGMENTS do
-
-    local v = 0
-
-    if i%(ARC_SEGMENTS/4) == 0 then
-      v = 1
-    elseif i%(ARC_SEGMENTS/16) == 0 then
-      v = 2
-    elseif i%(ARC_SEGMENTS/32) == 0 then
-      v = 4
-    else
-      v = math.random(DENSITY_MAX + 1) - 1
-    end
-
-    pattern[i] = v
-    -- table.insert(pattern)
-  end
-
-  return pattern
-end
-
-function gen_empty_pattern(pattern)
-  if pattern == nil then
-    pattern = {}
-  end
-  for i=1,64 do
-    pattern[i] = 0
-  end
-  return pattern
-end
-
-function gen_ring_pattern(r)
-  gen_pattern(patterns[r])
-  prev_pattern_refresh_t[r] = os.time()
-end
+local macros = {} -- NB: like mlr's patterns
 
 
 -- ------------------------------------------------------------------------
@@ -232,21 +177,18 @@ arc.add = arc_connect_maybe
 arc.remove = arc_remove_maybe
 
 params.action_read = function(filename, name, pset_number)
-	local seqfiles = filename .. ".argenseqs"
-	if util.file_exists(seqfiles) then
-		patterns = tab.load(seqfiles)
-	end
-	-- for _, player in pairs(nb:get_players()) do
-	-- 	player:stop_all()
-	-- end
+  pattern.load_for_pset(filename)
+  -- for _, player in pairs(nb:get_players()) do
+  -- 	player:stop_all()
+  -- end
 end
 
 params.action_write = function(filename, name, pset_number)
-	tab.save(patterns, filename .. ".argenseqs")
+  pattern.save_for_pset(filename)
 end
 
 params.action_delete = function(filename, name, pset_number)
-	os.execute("rm -f" .. filename .. ".argenseqs")
+  pattern.delete_for_pset(filename)
 end
 
 
@@ -336,14 +278,7 @@ function init()
 
                         -- and randomize others
                         params:set("ring_gen_pattern_"..r, 1)
-                        local density = DENSITY_MAX
-                        for try=1,math.floor(DENSITY_MAX/2) do
-                          local d = math.random(DENSITY_MAX)
-                          if d < density then
-                            density = d
-                          end
-                        end
-                        params:set("ring_density_"..r, density)
+                        params:set("ring_density_"..r, pattern.rnd_density())
 
                         if params:string("gen_all_mode") == "ptrn+kit" then
                           if sample.is_ring_outmode(r) then
@@ -367,13 +302,9 @@ function init()
   playback.init(ARCS)
   playback.reset_heads()
   hot_cursor.init(ARCS)
+  pattern.init(ARCS)
 
   for r=1,ARCS do
-    patterns[r] = gen_pattern()
-    sparse_patterns[r] = gen_empty_pattern()
-    raw_densities[r] = 0
-    prev_pattern_refresh_t[r] = 0
-
     is_firing[r] = false
     last_firing[r] = 0.0
 
@@ -382,19 +313,12 @@ function init()
     params:add_trigger("ring_gen_pattern_"..r, "Generate "..r)
     params:set_action("ring_gen_pattern_"..r,
                       function(v)
-                      gen_ring_pattern(r)
+                      pattern.gen_for_ring(r)
     end)
 
 
     params:add{type = "number", id = "ring_density_"..r, name = "Density "..r, min = 0, max = DENSITY_MAX, default = 0}
-    params:set_action("ring_density_"..r,
-                      function(v)
-                        -- NB: reset arc raw density counter
-                        if math.abs(util.linlin(0, ARC_RAW_DENSITY_RESOLUTION, 0, DENSITY_MAX, raw_densities[r]) - v) >= (1 * DENSITY_MAX / 10)  then
-                          raw_densities[r] = math.floor(util.linlin(0, DENSITY_MAX, 0, ARC_RAW_DENSITY_RESOLUTION, v))
-                        end
-                      end
-    )
+    params:set_action("ring_density_"..r, pattern.make_density_cb(r))
     params:add{type = "number", id = "ring_pattern_shift_"..r, name = "Pattern Shift "..r, min = -(ARC_SEGMENTS-1), max = (ARC_SEGMENTS-1), default = 0}
 
     params:add_option("ring_quantize_"..r, "Quantize "..r, ON_OFF)
@@ -488,7 +412,7 @@ function init()
       local step_s = 1 / ARC_REFRESH_SAMPLES
       while true do
         clock.sleep(step_s)
-        arc_segment_refresh()
+        pattern.recompute_parse_patterns()
       end
   end)
   arc_unquantized_clock = clock.run(
@@ -556,7 +480,7 @@ function arc_quantized_trigger()
   for r=1,ARCS do
     if params:string("ring_quantize_"..r) == "on" then
       is_firing[r] = false
-      for i, v in ipairs(sparse_patterns[r]) do
+      for i, v in ipairs(pattern.sparse_pattern_for_ring(r)) do
         -- local radial_pos = (i + pos_quant) + params:get("ring_pattern_shift_"..r)
         -- while radial_pos < 0 do
         --   radial_pos = radial_pos + ARC_SEGMENTS
@@ -599,7 +523,7 @@ function arc_unquantized_trigger()
         goto NEXT
       end
 
-      for i, v in ipairs(sparse_patterns[r]) do
+      for i, v in ipairs(pattern.sparse_pattern_for_ring(r)) do
         local radial_pos = (i + round(pos)) + params:get("ring_pattern_shift_"..r)
         while radial_pos < 0 do
           radial_pos = radial_pos + ARC_SEGMENTS
@@ -628,7 +552,7 @@ function arc_redraw()
 
     local display_pos = playback.ring_head_pos(r)
 
-    for i, v in ipairs(sparse_patterns[r]) do
+    for i, v in ipairs(pattern.sparse_pattern_for_ring(r)) do
       local radial_pos = (i + display_pos) + params:get("ring_pattern_shift_"..r)
       while radial_pos < 0 do
         radial_pos = radial_pos + ARC_SEGMENTS
@@ -649,21 +573,7 @@ function arc_redraw()
   a:refresh()
 end
 
-function arc_segment_refresh()
-  for r=1,ARCS do
-    for i=1,ARC_SEGMENTS do
-      if params:get("ring_density_"..r) == 0 then
-        sparse_patterns[r][i] = 0
-      else
-        if patterns[r][i] >= 1 and patterns[r][i] > (DENSITY_MAX - params:get("ring_density_"..r)) then
-          sparse_patterns[r][i] = 1
-        else
-          sparse_patterns[r][i] = 0
-        end
-      end
-    end
-  end
-end
+
 
 
 -- ------------------------------------------------------------------------
@@ -688,10 +598,10 @@ function grid_redraw()
         i = i + ARC_SEGMENTS
       end
 
-      local v = sparse_patterns[r][i]
+      local v = pattern.sparse_pattern_for_ring(r)[i]
       local led_v = 0
       if v == 1 then
-        led_v = round(util.linlin(0, DENSITY_MAX, 1, 8, patterns[r][i]))
+        led_v = pattern.led(r, i)
       end
 
       if pos == i_head then
@@ -767,13 +677,13 @@ function grid_key(x, y, z)
       local i = ARC_SEGMENTS - (x + ((y-1) * 8))
       i = mod1(i - params:get("ring_pattern_shift_"..r), 64)
 
-      local v = sparse_patterns[r][i]
+      local v = pattern.sparse_pattern_for_ring(r)[i]
       if v == 1 then
-        patterns[r][i] = 0
+        pattern.set(r, i, 0)
       else
         if params:get("ring_density_"..r) > 0 then
           -- FIXME: buggy for ring_density_<r> set to max
-          patterns[r][i] = DENSITY_MAX + 1 - params:get("ring_density_"..r)
+          pattern.set_from_density(r, i, params:get("ring_density_"..r))
         end
       end
     end
@@ -1007,8 +917,8 @@ end
 
 arc_delta_single = function(r, d)
   if k1 then
-    if os.time() - prev_pattern_refresh_t[r] > 1 then
-      gen_ring_pattern(r)
+    if not pattern.was_ring_gen_recently(r) then
+      pattern.gen_for_ring(r)
     end
     return
   end
@@ -1034,13 +944,7 @@ arc_delta_single = function(r, d)
     params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + d/7) % ARC_SEGMENTS)
     return
   end
-
-  -- NB: it feels better to undo faster
-  if d < 0 then
-    d = d + d * 1/3
-  end
-  raw_densities[r] = util.clamp(raw_densities[r] + d, 0, ARC_RAW_DENSITY_RESOLUTION)
-  params:set("ring_density_"..r, math.floor(util.linlin(0, ARC_RAW_DENSITY_RESOLUTION, 0, DENSITY_MAX, raw_densities[r])))
+  params:set("ring_density_"..r, pattern.density_delta_from_arc(r, d))
 end
 
 arc_delta = function(r, d)
@@ -1097,10 +1001,10 @@ function redraw()
     end
     nb_arcs_in_col = math.min(nb_arcs_in_col, MAX_ARCS_PER_LINE)
 
-    local x = SCREEN_W/nb_arcs_in_col * r2 - 2 * 3/nb_arcs_in_col * radius
+    local x = SCREEN_W/nb_arcs_in_col * r2 - 2 * 3/nb_arcs_in_col * VARC_RADIUS
 
     local radius = VARC_RADIUS
-    if os.time() - prev_pattern_refresh_t[r] < 1 then
+    if pattern.was_ring_gen_recently(r) then
       radius = VARC_RADIUS / 3
     end
 
