@@ -622,11 +622,19 @@ function grid_redraw()
     local l = 2
 
     -- (quantized) pattern shift
-    g:led(16, 1, 2) -- 1
-    g:led(15, 1, 2) -- 2
-    g:led(14, 1, 2) -- 4
-    g:led(13, 1, 2) -- 8
-    g:led(12, 1, 2) -- 16
+    l = (shift_quant == 1) and 5 or 2
+    g:led(12, 1, l) -- 1
+    l = (shift_quant == 2) and 5 or 2
+    g:led(13, 1, l) -- 2
+    l = (shift_quant == 4) and 5 or 2
+    g:led(14, 1, l) -- 4
+    l = (shift_quant == 8) and 5 or 2
+    g:led(15, 1, l) -- 8
+    l = (shift_quant == 16) and 5 or 2
+    g:led(16, 1, l) -- 16
+    -- -/+
+    g:led(13, 2, 2) -- -
+    g:led(15, 2, 2) -- +
 
     -- stop / pause / start
     l = 2
@@ -693,7 +701,7 @@ function grid_key(x, y, z)
   -- right pane - advanced controls
 
   -- pattern shift
-  if x == 16 and y ==1 then
+  if x == 16 and y == 1 then
     -- shift 16
     grid_shift = (z >= 1)
     if grid_shift then
@@ -701,15 +709,15 @@ function grid_key(x, y, z)
     else
       shift_quant = 1
     end
-  elseif x == 15 and y ==1 then
+  elseif x == 15 and y == 1 then
     -- shift 8
     grid_shift = (z >= 1)
     if grid_shift then
-      shift_quant = 5
+      shift_quant = 8
     else
       shift_quant = 1
     end
-  elseif x == 14 and y ==1 then
+  elseif x == 14 and y == 1 then
       -- shift 4
       grid_shift = (z >= 1)
       if grid_shift then
@@ -717,7 +725,7 @@ function grid_key(x, y, z)
       else
         shift_quant = 1
       end
-  elseif x == 13 and y ==1 then
+  elseif x == 13 and y == 1 then
     -- shift 2
     grid_shift = (z >= 1)
     if grid_shift then
@@ -725,10 +733,16 @@ function grid_key(x, y, z)
     else
       shift_quant = 1
     end
-  elseif x == 12 and y ==1 then
+  elseif x == 12 and y == 1 then
     -- shift 1
     grid_shift = (z >= 1)
     shift_quant = 1
+  end
+
+  if x == 13 and y == 2 and z >= 1 then
+    params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) - 1 * shift_quant) % ARC_SEGMENTS)
+  elseif x == 15 and y == 2 and z >= 1 then
+    params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + 1 * shift_quant) % ARC_SEGMENTS)
   end
 
   -- start/pause/stop
