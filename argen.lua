@@ -1113,7 +1113,7 @@ function redraw()
 
     local offset = playback.ring_head_pos(r) + params:get("ring_pattern_shift_"..r)
 
-    varc.redraw(x, y, radius2, level, fill, sparse_patterns[r], offset)
+    varc.redraw(x, y, radius, level, fill, pattern.sparse_pattern_for_ring(r), offset)
 
     if params:string("ring_quantize_"..r) == "off" then
       screen.pixel(x, y)
@@ -1126,16 +1126,16 @@ function redraw()
     screen.level(5)
     if not has_arc then
       if r >= screen_cursor and r < screen_cursor + SCREEN_CURSOR_LEN  then
-        screen.move(x - radius2 - 3, y + radius2 + 5)
-        screen.line(x + radius2 + 3, y + radius2 + 5)
+        screen.move(x - radius - 3, y + radius + 5)
+        screen.line(x + radius + 3, y + radius + 5)
         screen.stroke()
       end
     end
 
     if has_grid then
       if r == grid_cursor then
-        screen.move(x - radius2 - 1, y + radius2 + 8)
-        screen.line(x + radius2 + 1, y + radius2 + 8)
+        screen.move(x - radius - 1, y + radius + 8)
+        screen.line(x + radius + 1, y + radius + 8)
         screen.stroke()
       end
     end
