@@ -132,8 +132,7 @@ end
 
 
 function sample.init_playback_folders()
-  local kits_conf_file_sans_ext = norns.state.data.."kits"
-  local kits_conf_file = kits_conf_file_sans_ext .. ".lua"
+  local kits_conf_file = norns.state.data.."kits.lua"
 
   if not util.file_exists(kits_conf_file) then
     kits_folders = DEFAULT_KITS_FOLDERS
@@ -141,7 +140,7 @@ function sample.init_playback_folders()
     return
   end
 
-  local kits_folders_tmp = require(kits_conf_file_sans_ext)
+  local kits_folders_tmp = dofile(kits_conf_file)
   if kits_folders_tmp == nil then
     print("Failed to load user conf of favorite kit folders")
     kits_folders = DEFAULT_KITS_FOLDERS
