@@ -25,13 +25,14 @@ local prev_global_transpose = 0
 -- ------------------------------------------------------------------------
 -- state - kits
 
--- TODO: store it in conf file
-local RND_SAMPLE_FOLDERS = {
+local DEFAULT_KITS_FOLDERS = {
   "common/606",
   "common/808",
   "common/909",
   "blips/*",
 }
+
+local kits_folders = nil
 
 local found_sample_kits = {}
 local found_sample_kits_samples = {}
@@ -42,7 +43,7 @@ local nb_found_samples = 0
 local last_sample_scan_ts = 0
 
 function sample.rescan_kits()
-  for _, d in ipairs(RND_SAMPLE_FOLDERS) do
+  for _, d in ipairs(kits_folders) do
     found = scandirdir(_path.audio .. d)
     for _, d2 in ipairs(found) do
       nb_found_sample_kits = nb_found_sample_kits+1
@@ -129,6 +130,25 @@ function sample.global_pitch_transpose_delta(nb_arcs, d)
   end
 end
 
+
+function sample.init_playback_folders()
+  local kits_conf_file_sans_ext = norns.state.data.."kits"
+  local kits_conf_file = kits_conf_file_sans_ext .. ".lua"
+
+  if not util.file_exists(kits_conf_file) then
+    kits_folders = DEFAULT_KITS_FOLDERS
+    tab_save(kits_folders, kits_conf_file)
+    return
+  end
+
+  local kits_folders_tmp = require(kits_conf_file_sans_ext)
+  if kits_folders_tmp == nil then
+    print("Failed to load user conf of favorite kit folders")
+    kits_folders = DEFAULT_KITS_FOLDERS
+    return
+  end
+  kits_folders = kits_folders_tmp
+end
 
 function sample.init_params(nb_slots)
   Timber.options.PLAY_MODE_BUFFER_DEFAULT = 4

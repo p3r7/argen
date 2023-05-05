@@ -372,6 +372,7 @@ function init()
 
   playback.init_transport()
 
+  sample.init_playback_folders()
   sample.init_params(ARCS)
 
   -- --------------------------------
@@ -809,6 +810,7 @@ function grid_key(x, y, z)
   end
 
 end
+
 
 -- ------------------------------------------------------------------------
 -- controls
