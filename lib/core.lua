@@ -1,5 +1,7 @@
 
 
+local inspect = include("argen/lib/inspect")
+
 
 -- ------------------------------------------------------------------------
 -- math
@@ -66,4 +68,11 @@ function scandirdir(directory)
   end
   pfile:close()
   return t
+end
+
+function tab_save(t, filepath)
+  local file, err = io.open(filepath, "wb")
+  if err then return err end
+  file:write("return "..inspect(t))
+  file:close()
 end
