@@ -76,3 +76,7 @@ function tab_save(t, filepath)
   file:write("return "..inspect(t))
   file:close()
 end
+
+function file_ext(f)
+  return f:match("^.+%.(.+)$")
+end

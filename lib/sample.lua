@@ -32,6 +32,14 @@ local DEFAULT_KITS_FOLDERS = {
   "blips/*",
 }
 
+local VALID_SAMPLE_FILE_EXTS = {
+  "mp3",
+  "ogg",
+  "wav",
+  "flac",
+  "aac",
+}
+
 local kits_folders = nil
 
 local found_sample_kits = {}
@@ -42,6 +50,14 @@ local nb_found_sample_kits_samples = {}
 local nb_found_samples = 0
 local last_sample_scan_ts = 0
 
+function is_sound_file(s)
+  local ext = file_ext(s)
+  if ext == nil then
+    return false
+  end
+  return tab.contains(VALID_SAMPLE_FILE_EXTS, string.lower(ext))
+end
+
 function sample.rescan_kits()
   for _, d in ipairs(kits_folders) do
     found = scandirdir(_path.audio .. d)
@@ -51,10 +67,12 @@ function sample.rescan_kits()
       found_sample_kits_samples[d2] = {}
       nb_found_sample_kits_samples[d2] = 0
       for _, s in ipairs(util.scandir(d2)) do
-        nb_found_samples = nb_found_samples+1
-        nb_found_sample_kits_samples[d2] = nb_found_sample_kits_samples[d2]+1
-        table.insert(found_samples, d2.."/"..s)
-        table.insert(found_sample_kits_samples[d2], d2.."/"..s)
+        if is_sound_file(s) then
+          nb_found_samples = nb_found_samples+1
+          nb_found_sample_kits_samples[d2] = nb_found_sample_kits_samples[d2]+1
+          table.insert(found_samples, d2.."/"..s)
+          table.insert(found_sample_kits_samples[d2], d2.."/"..s)
+        end
       end
     end
   end
