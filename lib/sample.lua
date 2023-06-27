@@ -128,10 +128,11 @@ function sample.init_global_params(nb_arcs)
   end}
 
   params:add{type = "number", id = "transpose", name = "Transpose", min = -48, max = 48, default = 0, formatter = sample.format_st, action = function(v)
+               local delta = v - prev_global_transpose
                for r=1,nb_arcs do
-                 local delta = v - prev_global_transpose
                  params:set('transpose_'..r, params:get('transpose_'..r) + delta)
                end
+               prev_global_transpose = v
   end}
 end
 
@@ -144,7 +145,7 @@ function sample.global_pitch_transpose_delta(nb_arcs, d)
     end
   else
     prev_global_transpose = params:get("transpose")
-    params:set("transpose", params:get("transpose") + d)
+    params:set("transpose", prev_global_transpose + d)
   end
 end
 
