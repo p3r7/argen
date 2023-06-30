@@ -651,7 +651,11 @@ local function gled(g, x, y, l, t)
   gutil.led(g, x, y, l, g_reso, t)
 end
 
-local function grid_redraw_pattern(r)
+local function grid_redraw_pattern()
+  local r = grid_cursor
+
+  local pos = playback.ring_head_pos(r)
+
   for x=1,8 do
     for y=1, math.min(g.rows, 8) do
       local i_head = x + ((y-1) * 8)
@@ -669,7 +673,11 @@ local function grid_redraw_pattern(r)
 
       if pos == i_head then
         if led_v > 1 then
-          led_v = 15
+          if g_reso == 1 then
+            led_v = 0
+          else
+            led_v = 15
+          end
         else
           led_v = 5
         end
@@ -743,12 +751,8 @@ function grid_redraw()
   -- --------------------------------
   -- left pane - pattern editor
 
-  local r = grid_cursor
-
-  local pos = playback.ring_head_pos(r)
-
   if not grid_64_shift then
-    grid_redraw_pattern(r)
+    grid_redraw_pattern()
   end
 
   -- --------------------------------
