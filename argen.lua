@@ -61,6 +61,7 @@ local sample = include("argen/lib/sample")
 local oilcan = include("argen/lib/oilcan")
 
 include("argen/lib/core")
+local gutil = include("argen/lib/grid_utils")
 
 
 -- ------------------------------------------------------------------------
@@ -103,6 +104,7 @@ local last_firing = {}
 
 local a = nil
 local g = nil
+local g_reso = 15
 
 local SCREEN_CURSOR_LEN = 2
 local screen_cursor = 1
@@ -145,17 +147,22 @@ local checkpoint_clock
 local arc_delta
 
 function grid_connect_maybe(_g)
+  print("new grid!!!")
   if not has_grid then
+    print("register grid!!!")
     g = grid.connect()
     if g.device ~= nil then
       g.key = grid_key
+      g_reso = gutil.nb_levels(g)
       has_grid = true
     end
   end
 end
 
 function grid_remove_maybe(_g)
+  print("unpluggued grid!!!")
   if g.device.port == _g.port then
+    print("unregister grid!!!")
     -- current grid got deconnected
     has_grid = false
   end
@@ -638,18 +645,15 @@ end
 -- ------------------------------------------------------------------------
 -- grid
 
-function grid_redraw()
-  g:all(0)
+local grid_64_shift = false
 
-  -- --------------------------------
-  -- left pane - pattern editor
+local function gled(g, x, y, l, t)
+  gutil.led(g, x, y, l, g_reso, t)
+end
 
-  local r = grid_cursor
-
-  local pos = playback.ring_head_pos(r)
-
-  for x=1, math.min(g.cols, 8) do
-    for y=1, g.rows do
+local function grid_redraw_pattern(r)
+  for x=1,8 do
+    for y=1, math.min(g.rows, 8) do
       local i_head = x + ((y-1) * 8)
       local i = ARC_SEGMENTS - i_head
       i = mod1(i - params:get("ring_pattern_shift_"..r), 64)
@@ -670,71 +674,90 @@ function grid_redraw()
           led_v = 5
         end
       end
-      g:led(x, y, led_v)
+      gled(g, x, y, led_v, 2)
     end
+  end
+end
+
+local function grid_redraw_controls(x_offset)
+  local l = 2
+
+  -- (quantized) pattern shift
+  l = (shift_quant == 1) and 5 or 2
+  gled(g, 4 + x_offset, 1, l, 2) -- 1
+  l = (shift_quant == 2) and 5 or 2
+  gled(g, 5 + x_offset, 1, l, 2) -- 2
+  l = (shift_quant == 4) and 5 or 2
+  gled(g, 6 + x_offset, 1, l, 2) -- 4
+  l = (shift_quant == 8) and 5 or 2
+  gled(g, 7 + x_offset, 1, l, 2) -- 8
+  l = (shift_quant == 16) and 5 or 2
+  gled(g, 8 + x_offset, 1, l, 2) -- 16
+  -- -/+
+  gled(g, 6 + x_offset, 2, 2, 2) -- -
+  gled(g, 7 + x_offset, 2, 2, 2) -- +
+
+  -- checkpoints
+  l = (checkpoint_cursor > 1) and 5 or 2
+  gled(g, 2 + x_offset, 5, l, 2) -- prev
+  l = (checkpoint_cursor < checkpoint_counter) and 5 or 2
+  gled(g, 3 + x_offset, 5, l, 2) -- next
+
+  -- stop / pause / start
+  l = 2
+  if playback.is_running() then l = 5 end
+  gled(g, 5 + x_offset, 5, l, 2) -- start
+  l = 2
+  if playback.is_paused() then l = 5 end
+  gled(g, 6 + x_offset, 5, l, 2) -- pause
+  l = 2
+  if playback.is_stopped() then l = 5 end
+  gled(g, 7 + x_offset, 5, l, 2) -- stop
+
+  -- ring select
+  --  - all
+  l = 3
+  if hot_cursor.are_all() then l = 5 end
+  gled(g, 1 + x_offset, 7, l, 2)
+  --  - independant
+  local x_start = 3 + x_offset
+  for r=1,ARCS do
+    local x = x_start + r - 1
+    local l = 2
+    if grid_cursor == r then
+      if hot_cursor.is_active(r) then
+        l = 10
+      else
+        l = 5
+      end
+    elseif hot_cursor.is_active(r) then
+      l = 4
+    end
+    gled(g, x, 7, l, 2)
+  end
+end
+
+function grid_redraw()
+  g:all(0)
+
+  -- --------------------------------
+  -- left pane - pattern editor
+
+  local r = grid_cursor
+
+  local pos = playback.ring_head_pos(r)
+
+  if not grid_64_shift then
+    grid_redraw_pattern(r)
   end
 
   -- --------------------------------
   -- right pane - advanced controls
 
-  if g.cols > 8 then
-    local l = 2
-
-    -- (quantized) pattern shift
-    l = (shift_quant == 1) and 5 or 2
-    g:led(12, 1, l) -- 1
-    l = (shift_quant == 2) and 5 or 2
-    g:led(13, 1, l) -- 2
-    l = (shift_quant == 4) and 5 or 2
-    g:led(14, 1, l) -- 4
-    l = (shift_quant == 8) and 5 or 2
-    g:led(15, 1, l) -- 8
-    l = (shift_quant == 16) and 5 or 2
-    g:led(16, 1, l) -- 16
-    -- -/+
-    g:led(13, 2, 2) -- -
-    g:led(15, 2, 2) -- +
-
-    -- checkpoints
-    l = (checkpoint_cursor > 1) and 5 or 2
-    g:led(10, 5, l) -- prev
-    l = (checkpoint_cursor < checkpoint_counter) and 5 or 2
-    g:led(11, 5, l) -- next
-
-    -- stop / pause / start
-    l = 2
-    if playback.is_running() then l = 5 end
-    g:led(13, 5, l) -- start
-    l = 2
-    if playback.is_paused() then l = 5 end
-    g:led(14, 5, l) -- pause
-    l = 2
-    if playback.is_stopped() then l = 5 end
-    g:led(15, 5, l) -- stop
-
-    -- ring select
-    --  - all
-    l = 3
-    if hot_cursor.are_all() then l = 5 end
-    g:led(9, 7, l)
-    --  - independant
-    local x_start = 11
-    for r=1,ARCS do
-      local x = x_start + r - 1
-      local l = 2
-      if grid_cursor == r then
-        if hot_cursor.is_active(r) then
-          l = 10
-        else
-          l = 5
-        end
-      elseif hot_cursor.is_active(r) then
-        l = 4
-      end
-      g:led(x, 7, l)
-    end
+  if g.cols > 8 or grid_64_shift then
+    local x_offset = (g.cols > 8) and 8 or 0
+    grid_redraw_controls(x_offset)
   end
-
   g:refresh()
 end
 
@@ -742,10 +765,15 @@ end
 function grid_key(x, y, z)
   local r = grid_cursor
 
+  if g.cols == 8 and x == 8 and y == 8 and z >= 1 then
+    grid_64_shift = not grid_64_shift
+    return
+  end
+
   -- --------------------------------
   -- left pane - pattern editor
 
-  if x <= math.min(g.cols, 8) then
+  if (g.cols > 8 and x <= 8) or not grid_64_shift then
     if z >= 1 then
       local i = ARC_SEGMENTS - (x + ((y-1) * 8))
       i = mod1(i - params:get("ring_pattern_shift_"..r), 64)
@@ -765,24 +793,30 @@ function grid_key(x, y, z)
   -- --------------------------------
   -- right pane - advanced controls
 
-  -- pattern shift
-  if x == 16 and y == 1 then
-    -- shift 16
-    grid_shift = (z >= 1)
-    if grid_shift then
-      shift_quant = 16
-    else
-      shift_quant = 1
+  if x > 8 or grid_64_shift then
+
+    if grid_64_shift then
+      x = x + 8
     end
-  elseif x == 15 and y == 1 then
-    -- shift 8
-    grid_shift = (z >= 1)
-    if grid_shift then
-      shift_quant = 8
-    else
-      shift_quant = 1
-    end
-  elseif x == 14 and y == 1 then
+
+    -- pattern shift
+    if x == 16 and y == 1 then
+      -- shift 16
+      grid_shift = (z >= 1)
+      if grid_shift then
+        shift_quant = 16
+      else
+        shift_quant = 1
+      end
+    elseif x == 15 and y == 1 then
+      -- shift 8
+      grid_shift = (z >= 1)
+      if grid_shift then
+        shift_quant = 8
+      else
+        shift_quant = 1
+      end
+    elseif x == 14 and y == 1 then
       -- shift 4
       grid_shift = (z >= 1)
       if grid_shift then
@@ -790,96 +824,101 @@ function grid_key(x, y, z)
       else
         shift_quant = 1
       end
-  elseif x == 13 and y == 1 then
-    -- shift 2
-    grid_shift = (z >= 1)
-    if grid_shift then
-      shift_quant = 2
-    else
+    elseif x == 13 and y == 1 then
+      -- shift 2
+      grid_shift = (z >= 1)
+      if grid_shift then
+        shift_quant = 2
+      else
+        shift_quant = 1
+      end
+    elseif x == 12 and y == 1 then
+      -- shift 1
+      grid_shift = (z >= 1)
       shift_quant = 1
     end
-  elseif x == 12 and y == 1 then
-    -- shift 1
-    grid_shift = (z >= 1)
-    shift_quant = 1
-  end
 
-  if x == 13 and y == 2 and z >= 1 then
-    if hot_cursor.are_all() then
-      for r2=1,ARCS do
-        params:set("ring_pattern_shift_"..r2, math.floor(params:get("ring_pattern_shift_"..r2) - 1 * shift_quant) % ARC_SEGMENTS)
-      end
-    else
-      params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) - 1 * shift_quant) % ARC_SEGMENTS)
-    end
-  elseif x == 15 and y == 2 and z >= 1 then
-    if hot_cursor.are_all() then
-      for r2=1,ARCS do
-        params:set("ring_pattern_shift_"..r2, math.floor(params:get("ring_pattern_shift_"..r2) + 1 * shift_quant) % ARC_SEGMENTS)
-      end
-    else
-      params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + 1 * shift_quant) % ARC_SEGMENTS)
-    end
-  end
-
-  -- checkpoints
-  if x == 10 and y == 5 and z >= 1 then
-    checkpoint_prev()
-  elseif x == 11 and y == 5 and z >= 1 then
-    checkpoint_next()
-  end
-
-  -- start/pause/stop
-  if x == 13 and y == 5 then
-    play_btn_on = (z >= 1)
-
-    if play_btn_on then
-      playback.start(true)
-    end
-  elseif x == 14 and y == 5 and (z >= 1)then
-    playback.pause(true)
-  elseif x == 15 and y == 5 and (z >= 1) then
-    if play_btn_on then
-      playback.restart(true)
-    else
-      playback.stop(true)
-    end
-  end
-
-  -- ring select / mute
-  --  - all
-  local is_grid_all_k = false
-  if x == 9 and y == 7 then
-    grid_all_rings_btn = (z >= 1)
-  end
-
-  --  - independant
-  local x_start = 11
-  local is_curr_key_cursor_sel = false
-  for r=1,ARCS do
-    local rx = x_start + r - 1
-    if rx == x and y == 7 then
-      is_curr_key_cursor_sel = true
-      local pressed = (z >= 1)
-      if pressed then
-        if not hot_cursor.is_any_active() then
-          grid_cursor = r
+    if x == 13 and y == 2 and z >= 1 then
+      if hot_cursor.are_all() then
+        for r2=1,ARCS do
+          params:set("ring_pattern_shift_"..r2, math.floor(params:get("ring_pattern_shift_"..r2) - 1 * shift_quant) % ARC_SEGMENTS)
         end
+      else
+        params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) - 1 * shift_quant) % ARC_SEGMENTS)
       end
-      hot_cursor.set(r, pressed)
+    elseif x == 15 and y == 2 and z >= 1 then
+      if hot_cursor.are_all() then
+        for r2=1,ARCS do
+          params:set("ring_pattern_shift_"..r2, math.floor(params:get("ring_pattern_shift_"..r2) + 1 * shift_quant) % ARC_SEGMENTS)
+        end
+      else
+        params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + 1 * shift_quant) % ARC_SEGMENTS)
+      end
     end
-  end
 
-  -- recompute global state
-  hot_cursor.recompute(grid_all_rings_btn)
-
-  for r=1,ARCS do
-    playback.unmute_ring(r)
-    if play_btn_on and hot_cursor.is_active(r) then
-      playback.mute_ring(r)
+    -- checkpoints
+    if x == 10 and y == 5 and z >= 1 then
+      checkpoint_prev()
+    elseif x == 11 and y == 5 and z >= 1 then
+      if checkpoint_cursor == checkpoint_counter and has_changed then
+        checkpoint.read(checkpoint_cursor)
+      else
+        checkpoint_next()
+      end
     end
-  end
 
+    -- start/pause/stop
+    if x == 13 and y == 5 then
+      play_btn_on = (z >= 1)
+
+      if play_btn_on then
+        playback.start(true)
+      end
+    elseif x == 14 and y == 5 and (z >= 1)then
+      playback.pause(true)
+    elseif x == 15 and y == 5 and (z >= 1) then
+      if play_btn_on then
+        playback.restart(true)
+      else
+        playback.stop(true)
+      end
+    end
+
+    -- ring select / mute
+    --  - all
+    local is_grid_all_k = false
+    if x == 9 and y == 7 then
+      grid_all_rings_btn = (z >= 1)
+    end
+
+    --  - independant
+    local x_start = 11
+    local is_curr_key_cursor_sel = false
+    for r=1,ARCS do
+      local rx = x_start + r - 1
+      if rx == x and y == 7 then
+        is_curr_key_cursor_sel = true
+        local pressed = (z >= 1)
+        if pressed then
+          if not hot_cursor.is_any_active() then
+            grid_cursor = r
+          end
+        end
+        hot_cursor.set(r, pressed)
+      end
+    end
+
+    -- recompute global state
+    hot_cursor.recompute(grid_all_rings_btn)
+
+    for r=1,ARCS do
+      playback.unmute_ring(r)
+      if play_btn_on and hot_cursor.is_active(r) then
+        playback.mute_ring(r)
+      end
+    end
+
+  end
 end
 
 
