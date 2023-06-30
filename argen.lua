@@ -56,6 +56,7 @@ hot_cursor = include("argen/lib/hot_cursor")
 local pattern = include("argen/lib/pattern")
 local varc = include("argen/lib/varc")
 local playback = include("argen/lib/playback")
+local checkpoint = include("argen/lib/checkpoint")
 local sample = include("argen/lib/sample")
 local oilcan = include("argen/lib/oilcan")
 
@@ -91,6 +92,8 @@ local MAX_BPM = 2000
 
 local FAST_FIRING_DELTA = 0.02
 
+local CHECKPOINT_SAVE_DELTA = 0.3
+
 local is_firing = {}
 local last_firing = {}
 
@@ -123,6 +126,11 @@ local NB_RECALLS = 4
 local recalls = {}
 local macros = {} -- NB: like mlr's patterns
 
+local checkpoint_counter = 0
+local checkpoint_cursor = 0
+local has_changed = false
+local last_change_t = os.clock()
+
 
 -- ------------------------------------------------------------------------
 -- script lifecycle
@@ -132,6 +140,7 @@ local grid_redraw_clock
 local arc_redraw_clock
 local arc_segment_refresh_clock
 local arc_unquantized_clock
+local checkpoint_clock
 
 local arc_delta
 
@@ -196,6 +205,8 @@ end
 function init()
   screen.aa(1)
   screen.line_width(1)
+
+  checkpoint.init_dir()
 
   s_lattice = lattice:new{}
 
@@ -424,6 +435,20 @@ function init()
         arc_unquantized_trigger()
       end
   end)
+  checkpoint_clock = clock.run(
+    function()
+      local step_s = 1 / 10
+      while true do
+        clock.sleep(step_s)
+        if checkpoint_cursor == checkpoint_counter
+          and has_changed
+          and math.abs(os.clock() - last_change_t) > CHECKPOINT_SAVE_DELTA then
+          checkpoint_save()
+        end
+      end
+  end)
+
+  checkpoint_save()
 
   local sprocket = s_lattice:new_sprocket{
     action = arc_quantized_trigger,
@@ -440,6 +465,8 @@ function cleanup()
   clock.cancel(arc_segment_refresh_clock)
   clock.cancel(arc_unquantized_clock)
   s_lattice:destroy()
+
+  checkpoint.clear_dir()
 end
 
 
@@ -458,6 +485,39 @@ function note_trigger(r)
   end
 end
 
+
+-- ------------------------------------------------------------------------
+-- checkpoints
+
+function register_change()
+  has_changed = true
+  last_change_t = os.clock()
+end
+
+function checkpoint_save()
+  checkpoint_counter = checkpoint_counter + 1
+  checkpoint.write(checkpoint_counter)
+  checkpoint_cursor = checkpoint_counter
+  has_changed = false
+end
+
+function checkpoint_prev()
+  if checkpoint_cursor - 1 < 1 then
+    return
+  end
+
+  checkpoint_cursor = checkpoint_cursor - 1
+  checkpoint.read(checkpoint_cursor)
+end
+
+function checkpoint_next()
+  if checkpoint_cursor + 1 > checkpoint_counter then
+    return
+  end
+
+  checkpoint_cursor = checkpoint_cursor + 1
+  checkpoint.read(checkpoint_cursor)
+end
 
 -- ------------------------------------------------------------------------
 -- arc
@@ -575,8 +635,6 @@ function arc_redraw()
 end
 
 
-
-
 -- ------------------------------------------------------------------------
 -- grid
 
@@ -636,6 +694,12 @@ function grid_redraw()
     -- -/+
     g:led(13, 2, 2) -- -
     g:led(15, 2, 2) -- +
+
+    -- checkpoints
+    l = (checkpoint_cursor > 1) and 5 or 2
+    g:led(10, 5, l) -- prev
+    l = (checkpoint_cursor < checkpoint_counter) and 5 or 2
+    g:led(11, 5, l) -- next
 
     -- stop / pause / start
     l = 2
@@ -758,6 +822,13 @@ function grid_key(x, y, z)
     end
   end
 
+  -- checkpoints
+  if x == 10 and y == 5 and z >= 1 then
+    checkpoint_prev()
+  elseif x == 11 and y == 5 and z >= 1 then
+    checkpoint_next()
+  end
+
   -- start/pause/stop
   if x == 13 and y == 5 then
     play_btn_on = (z >= 1)
@@ -856,6 +927,8 @@ function key(n, v)
 
   if k1 and k3 then
     params:set("gen_all", 1)
+    register_change()
+    checkpoint_save()
   end
 
 end
@@ -895,12 +968,15 @@ function enc(n, d)
     if not has_arc then
       if k1 then
         params:set("clock_tempo", params:get("clock_tempo") + d)
+        register_change()
       else
         local sign = math.floor(d/math.abs(d))
         screen_cursor = util.clamp(screen_cursor + sign, 1, ARCS - SCREEN_CURSOR_LEN + 1)
+        register_change()
       end
     else
       params:set("clock_tempo", params:get("clock_tempo") + d)
+      register_change()
     end
     return
   end
@@ -909,14 +985,17 @@ function enc(n, d)
     if not has_arc then
       if k1 then
         sample.global_pitch_transpose_delta(ARCS, d)
+        register_change()
       else
         local has_effect = enc_no_arc(screen_cursor, d)
         if has_effect then
+          register_change()
           return
         end
       end
     else
       sample.global_pitch_transpose_delta(ARCS, d)
+      register_change()
     end
     return
   end
@@ -924,10 +1003,12 @@ function enc(n, d)
   if n == 3 then
     if not has_arc then
       if k1 then
-          params:set("filter_freq", params:get("filter_freq") + d * 50)
+        params:set("filter_freq", params:get("filter_freq") + d * 50)
+        register_change()
       else
         local has_effect = enc_no_arc(screen_cursor+1, d)
         if has_effect then
+          register_change()
           return
         end
       end
@@ -935,8 +1016,10 @@ function enc(n, d)
 
     if k2 then
       params:set("filter_resonance", params:get("filter_resonance") + d/20)
+      register_change()
     else
       params:set("filter_freq", params:get("filter_freq") + d * 50)
+      register_change()
     end
     return
   end
@@ -947,32 +1030,38 @@ arc_delta_single = function(r, d)
   if k1 then
     if not pattern.was_ring_gen_recently(r) then
       pattern.gen_for_ring(r)
+      register_change()
     end
     return
   end
 
   if k2_k3 then
     params:set("ring_quantize_"..r, 1) -- on
+    register_change()
     return
   end
 
   if k2 then
     params:set("ring_quantize_"..r, 2) -- off
     params:set("ring_bpm_"..r, math.floor(params:get("ring_bpm_"..r) + d))
+    register_change()
     return
   end
 
   if grid_shift then
     local sign = math.floor(d/math.abs(d))
     params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + sign * shift_quant) % ARC_SEGMENTS)
+    register_change()
     return true
   end
   if k3 then
     -- pattern_shifts[r] = math.floor(pattern_shifts[r] + d/5) % 64
     params:set("ring_pattern_shift_"..r, math.floor(params:get("ring_pattern_shift_"..r) + d/7) % ARC_SEGMENTS)
+    register_change()
     return
   end
   params:set("ring_density_"..r, pattern.density_delta_from_arc(r, d))
+  register_change()
 end
 
 arc_delta = function(r, d)
