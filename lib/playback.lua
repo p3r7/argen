@@ -50,6 +50,10 @@ function playback.sync_ring_unquant_head(r)
   unquantized_rot_pos[r] = pos_quant
 end
 
+function playback.reset_unquantized_ring_head_pos(r)
+  unquantized_rot_pos[r] = INIT_POS
+end
+
 function playback.ring_head_pos(r)
   if params:string("ring_quantize_"..r) == "on"  then
     return pos_quant

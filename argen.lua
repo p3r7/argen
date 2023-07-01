@@ -80,6 +80,12 @@ local GRID_FPS = 15
 local ARC_REFRESH_SAMPLES = 10
 local UNQUANTIZED_SAMPLES = 128
 
+local MCLOCK_DIV_DENOM = 32
+local MCLOCK_DIV = 1/MCLOCK_DIV_DENOM
+
+local CLOCK_DIV_DENOMS = {1, 2, 4, 8}
+local CLOCK_DIVS = {"off", "1/1", "1/2", "1/4", "1/8"}
+
 local SCREEN_H = 64
 local SCREEN_W = 128
 
@@ -326,7 +332,7 @@ function init()
     is_firing[r] = false
     last_firing[r] = 0.0
 
-    params:add_group("Ring " .. r, 11)
+    params:add_group("Ring " .. r, 12)
 
     params:add_trigger("ring_gen_pattern_"..r, "Generate "..r)
     params:set_action("ring_gen_pattern_"..r,
@@ -344,16 +350,21 @@ function init()
                       function(v)
                         if ON_OFF[v] == "on" then
                           params:hide("ring_bpm_"..r)
+                          params:hide("ring_unquantized_reset_"..r)
                         else
                           playback.sync_ring_unquant_head(r)
                           params:set("ring_bpm_"..r, params:get("clock_tempo"))
                           params:show("ring_bpm_"..r)
+                          params:show("ring_unquantized_reset_"..r)
                         end
                         _menu.rebuild_params()
                       end
     )
+    params:add_option("ring_unquantized_reset_"..r, "Reset "..r, CLOCK_DIVS)
+    params:hide("ring_unquantized_reset_"..r)
     params:add{type = "number", id = "ring_bpm_"..r, name = "BPM "..r, min = -MAX_BPM, max = MAX_BPM, default = 20}
     params:hide("ring_bpm_"..r)
+
 
     params:add_option("ring_out_mode_"..r, "Out Mode "..r, OUT_VOICE_MODES)
     params:set_action("ring_out_mode_"..r,
@@ -459,7 +470,7 @@ function init()
 
   local sprocket = s_lattice:new_sprocket{
     action = arc_quantized_trigger,
-    division = 1/32,
+    division = MCLOCK_DIV,
     enabled = true
   }
   s_lattice:start()
@@ -529,6 +540,8 @@ end
 -- ------------------------------------------------------------------------
 -- arc
 
+local clock_accum = 0
+
 function pos_2_radial_pos(pos, shift, i)
   if i == nil then i = 1 end
   local radial_pos = ((i + pos) + shift)
@@ -538,9 +551,15 @@ function pos_2_radial_pos(pos, shift, i)
   return radial_pos
 end
 
+
 function arc_quantized_trigger()
   if playback.is_paused_or_stopepd() then
     return
+  end
+
+  clock_accum = clock_accum + MCLOCK_DIV
+  if clock_accum >= 1 then
+    clock_accum = 0
   end
 
   playback.quant_head_advance(ARC_SEGMENTS)
@@ -563,6 +582,14 @@ function arc_quantized_trigger()
             is_firing[r] = true
             last_firing[r] = os.clock()
           end
+        end
+      end
+    else
+      if params:string("ring_unquantized_reset_"..r) ~= "off" then
+        local i = tab.key(CLOCK_DIVS, params:string("ring_unquantized_reset_"..r))
+        local clock_div = CLOCK_DIV_DENOMS[i-1]
+        if clock_accum % (1/clock_div) == 0 then
+          playback.reset_unquantized_ring_head_pos(r)
         end
       end
     end
