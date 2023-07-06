@@ -188,7 +188,6 @@ function arc_connect_maybe(_a)
         arc_size = 2
       else
         arc_size = 4
-        arc_size = 2
       end
       a.delta = arc_delta
       has_arc = true
