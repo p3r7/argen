@@ -8,6 +8,7 @@
 --    ▼ instructions below ▼
 --
 --   when arc detected:
+-- E1         - select rings
 -- arc        - density
 -- K2 + arc   - quantize off
 --              & speed control
@@ -112,12 +113,13 @@ local a = nil
 local g = nil
 local g_reso = 15
 
-local SCREEN_CURSOR_LEN = 2
-local screen_cursor = 1
+local ARC_CURSOR_LEN = 2
+local arc_cursor = 1
 local grid_cursor = 1
 local play_btn_on = false
 
 local has_arc = false
+local arc_size = 4
 local has_grid = false
 
 grid_all_rings_btn = false
@@ -139,6 +141,9 @@ local checkpoint_cursor = 0
 local has_changed = false
 local last_change_t = os.clock()
 
+local function should_display_arc_cursor()
+  return (not has_arc) or (arc_size == 2)
+end
 
 -- ------------------------------------------------------------------------
 -- script lifecycle
@@ -179,8 +184,15 @@ function arc_connect_maybe(_a)
   if not has_arc then
     a = arc.connect()
     if a.name ~= "none" and a.device ~= nil then
+      if string.match(a.device.name, 'arc 2') then
+        arc_size = 2
+      else
+        arc_size = 4
+        arc_size = 2
+      end
       a.delta = arc_delta
       has_arc = true
+      arc_cursor = 1
     end
   end
 end
@@ -643,7 +655,7 @@ end
 function arc_redraw()
   a:all(0)
 
-  for r=1,ARCS do
+  for r=arc_cursor,arc_cursor+arc_size-1 do
 
     local display_pos = playback.ring_head_pos(r)
 
@@ -655,12 +667,12 @@ function arc_redraw()
 
       local l = 0
       if v == 1 then
-        a:led(r, radial_pos, 3)
+        a:led(r-arc_cursor+1, radial_pos, 3)
       end
     end
 
     if is_firing[r] or math.abs(os.clock() - last_firing[r]) < FAST_FIRING_DELTA then
-      a:led(r, 1, 15)
+      a:led(r-arc_cursor+1, 1, 15)
     end
 
   end
@@ -1035,13 +1047,13 @@ end
 
 function enc(n, d)
   if n == 1 then
-    if not has_arc then
+    if should_display_arc_cursor() then
       if k1 then
         params:set("clock_tempo", params:get("clock_tempo") + d)
         register_change()
       else
         local sign = math.floor(d/math.abs(d))
-        screen_cursor = util.clamp(screen_cursor + sign, 1, ARCS - SCREEN_CURSOR_LEN + 1)
+        arc_cursor = util.clamp(arc_cursor + sign, 1, ARCS - ARC_CURSOR_LEN + 1)
         register_change()
       end
     else
@@ -1057,7 +1069,7 @@ function enc(n, d)
         sample.global_pitch_transpose_delta(ARCS, d)
         register_change()
       else
-        local has_effect = enc_no_arc(screen_cursor, d)
+        local has_effect = enc_no_arc(arc_cursor, d)
         if has_effect then
           register_change()
           return
@@ -1076,7 +1088,7 @@ function enc(n, d)
         params:set("filter_freq", params:get("filter_freq") + d * 50)
         register_change()
       else
-        local has_effect = enc_no_arc(screen_cursor+1, d)
+        local has_effect = enc_no_arc(arc_cursor+1, d)
         if has_effect then
           register_change()
           return
@@ -1140,6 +1152,10 @@ arc_delta = function(r, d)
       arc_delta_single(r, d)
     end
   else
+    if r > arc_size then
+      return
+    end
+    r = r + arc_cursor - 1
     grid_cursor = r
     arc_delta_single(r, d)
   end
@@ -1215,8 +1231,8 @@ function redraw()
     screen.aa(0)
     screen.line_width(1.5)
     screen.level(5)
-    if not has_arc then
-      if r >= screen_cursor and r < screen_cursor + SCREEN_CURSOR_LEN  then
+    if should_display_arc_cursor() then
+      if r >= arc_cursor and r < arc_cursor + ARC_CURSOR_LEN  then
         screen.move(x - radius - 3, y + radius + 5)
         screen.line(x + radius + 3, y + radius + 5)
         screen.stroke()
