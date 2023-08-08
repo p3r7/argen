@@ -92,7 +92,8 @@ local SCREEN_W = 128
 
 local MAX_ARCS = 16
 -- local ARCS = 8
-local ARCS = 4
+local ARCS = 8
+local MAX_ARCS_PER_LINE = 4
 
 local ARC_SEGMENTS = 64
 
@@ -113,13 +114,13 @@ local a = nil
 local g = nil
 local g_reso = 15
 
-local ARC_CURSOR_LEN = 2
-local arc_cursor = 1
+arc_cursor = 1
+prev_arc_cursor = 1
 local grid_cursor = 1
 local play_btn_on = false
 
-local has_arc = false
-local arc_size = 4
+has_arc = false
+arc_size = 4
 local has_grid = false
 
 grid_all_rings_btn = false
@@ -142,11 +143,20 @@ local has_changed = false
 local last_change_t = os.clock()
 
 local function should_display_arc_cursor()
-  return (not has_arc) or (arc_size == 2)
+  return (not has_arc) or (arc_size < ARCS)
 end
 
+local function arc_cursor_len()
+  if has_arc then
+    return arc_size
+  else
+    return 2
+  end
+end
+
+
 -- ------------------------------------------------------------------------
--- script lifecycle
+-- external i/o
 
 local redraw_clock
 local grid_redraw_clock
@@ -192,6 +202,7 @@ function arc_connect_maybe(_a)
       a.delta = arc_delta
       has_arc = true
       arc_cursor = 1
+      prev_arc_cursor = 1
     end
   end
 end
@@ -210,7 +221,7 @@ arc.add = arc_connect_maybe
 arc.remove = arc_remove_maybe
 
 params.action_read = function(filename, name, pset_number)
-  pattern.load_for_pset(filename)
+  pattern.load_for_pset(filename, ARCS)
   -- for _, player in pairs(nb:get_players()) do
   -- 	player:stop_all()
   -- end
@@ -225,6 +236,8 @@ params.action_delete = function(filename, name, pset_number)
 end
 
 
+-- ------------------------------------------------------------------------
+-- script lifecycle
 
 function init()
   screen.aa(1)
@@ -236,6 +249,9 @@ function init()
 
   grid_connect_maybe()
   arc_connect_maybe()
+  if not has_arc then
+    arc_size = 2 -- E2 & E3 ating as arcs
+  end
 
   local OUT_VOICE_MODES = {"sample", "nb"}
   local RANDOMIZE_MODES = {"ptrn", "ptrn+kit", "ptrn+smpl"}
@@ -654,7 +670,7 @@ end
 function arc_redraw()
   a:all(0)
 
-  for r=arc_cursor,arc_cursor+arc_size-1 do
+  for r=arc_cursor, arc_cursor+arc_size-1 do
 
     local display_pos = playback.ring_head_pos(r)
 
@@ -765,21 +781,31 @@ local function grid_redraw_controls(x_offset)
   l = 3
   if hot_cursor.are_all() then l = 5 end
   gled(g, 1 + x_offset, 7, l, 2)
+
   --  - independant
   local x_start = 3 + x_offset
   for r=1,ARCS do
     local x = x_start + r - 1
-    local l = 2
+    local y = 7
+    if r > MAX_ARCS_PER_LINE then
+      x = x - MAX_ARCS_PER_LINE
+      y = y + 1
+    end
+    local is_on_screen = (r >= arc_cursor and r < arc_cursor + arc_cursor_len())
+    local l = 1
+    if is_on_screen then l = 3 end
     if grid_cursor == r then
       if hot_cursor.is_active(r) then
         l = 10
+        if is_on_screen then l = 12 end
       else
         l = 5
       end
     elseif hot_cursor.is_active(r) then
       l = 4
+      if is_on_screen then l = 6 end
     end
-    gled(g, x, 7, l, 2)
+    gled(g, x, y, l, 2)
   end
 end
 
@@ -938,7 +964,12 @@ function grid_key(x, y, z)
     local is_curr_key_cursor_sel = false
     for r=1,ARCS do
       local rx = x_start + r - 1
-      if rx == x and y == 7 then
+      local ry = 7
+      if r > MAX_ARCS_PER_LINE then
+        rx = rx - MAX_ARCS_PER_LINE
+        ry = ry + 1
+      end
+      if rx == x and ry == y then
         is_curr_key_cursor_sel = true
         local pressed = (z >= 1)
         if pressed then
@@ -1052,7 +1083,8 @@ function enc(n, d)
         register_change()
       else
         local sign = math.floor(d/math.abs(d))
-        arc_cursor = util.clamp(arc_cursor + sign, 1, ARCS - ARC_CURSOR_LEN + 1)
+        prev_arc_cursor = arc_cursor
+        arc_cursor = util.clamp(arc_cursor + sign, 1, ARCS - arc_cursor_len() + 1)
         register_change()
       end
     else
@@ -1179,31 +1211,30 @@ function redraw()
   screen.move(95, 16)
   screen.text("Q: "..params:get("filter_resonance"))
 
-  local MAX_ARCS_PER_LINE = 8
-  for r=1,ARCS do
+  local MAX_ARCS_PER_LINE = 4
 
-    local r2 = r
-    while r2 > MAX_ARCS_PER_LINE do
-      r2 = r2 - MAX_ARCS_PER_LINE
+  local start
+  if arc_cursor - prev_arc_cursor >= 0 then
+    start = 1
+    while arc_cursor + arc_cursor_len() - start > MAX_ARCS_PER_LINE do
+      start = start + 1
     end
+  else
+    start = ARCS - MAX_ARCS_PER_LINE + 1
+    while start > arc_cursor do
+      start = start - 1
+    end
+  end
+
+  local ri = 1
+  for r=start,math.min(start+MAX_ARCS_PER_LINE-1, ARCS) do
 
     local y_ratio = 2/3
-    if ARCS > MAX_ARCS_PER_LINE then
-      if r <= MAX_ARCS_PER_LINE then
-        y_ratio = 1/2
-      else
-        y_ratio = 3/4
-      end
-    end
     local y = y_ratio * SCREEN_H
 
-    local nb_arcs_in_col = ARCS
-    while r > MAX_ARCS_PER_LINE and nb_arcs_in_col > MAX_ARCS_PER_LINE do
-      nb_arcs_in_col = nb_arcs_in_col - MAX_ARCS_PER_LINE
-    end
-    nb_arcs_in_col = math.min(nb_arcs_in_col, MAX_ARCS_PER_LINE)
+    local nb_arcs_in_col = MAX_ARCS_PER_LINE
 
-    local x = SCREEN_W/nb_arcs_in_col * r2 - 2 * 3/nb_arcs_in_col * VARC_RADIUS
+    local x = SCREEN_W/nb_arcs_in_col * ri - 2 * 3/nb_arcs_in_col * VARC_RADIUS
 
     local radius = VARC_RADIUS
     if pattern.was_ring_gen_recently(r) then
@@ -1231,7 +1262,7 @@ function redraw()
     screen.line_width(1.5)
     screen.level(5)
     if should_display_arc_cursor() then
-      if r >= arc_cursor and r < arc_cursor + ARC_CURSOR_LEN  then
+      if r >= arc_cursor and r < arc_cursor + arc_cursor_len()  then
         screen.move(x - radius - 3, y + radius + 5)
         screen.line(x + radius + 3, y + radius + 5)
         screen.stroke()
@@ -1250,6 +1281,21 @@ function redraw()
     screen.level(15)
 
     local display_pos = playback.ring_head_pos(r)
+
+    ri = ri + 1
+  end
+
+  if start > 1 then
+    screen.move(8, SCREEN_H*1/3)
+    screen.line(4, SCREEN_H*1/3 + 3)
+    screen.line(8, SCREEN_H*1/3 + 6)
+    screen.stroke()
+  end
+  if start+MAX_ARCS_PER_LINE-1 < ARCS then
+    screen.move(SCREEN_W-8, SCREEN_H*1/3)
+    screen.line(SCREEN_W-4, SCREEN_H*1/3 + 3)
+    screen.line(SCREEN_W-8, SCREEN_H*1/3 + 6)
+    screen.stroke()
   end
 
   screen.update()

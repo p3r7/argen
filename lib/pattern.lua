@@ -153,10 +153,17 @@ function pattern.init(nb_arcs)
   end
 end
 
-function pattern.load_for_pset(pset_filename)
+function pattern.load_for_pset(pset_filename, nb_arcs)
   local seqfiles = pset_filename .. ".argenseqs"
   if util.file_exists(seqfiles) then
     patterns = tab.load(seqfiles)
+  end
+  -- NB: handle older PSET when we had fewer arcs active
+  local nb_loaded_patterns = tab.count(patterns)
+  while nb_loaded_patterns < nb_arcs do
+    local r = nb_loaded_patterns + 1
+    patterns[r] = gen_empty_pattern()
+    nb_loaded_patterns = nb_loaded_patterns + 1
   end
 end
 
