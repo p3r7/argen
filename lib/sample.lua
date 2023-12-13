@@ -5,7 +5,10 @@ local Formatters = require "formatters"
 
 local MusicUtil = require "musicutil"
 
-local Timber = include("timber/lib/timber_engine")
+local Timber
+if norns then
+  Timber = include("timber/lib/timber_engine")
+end
 
 hot_cursor = include("argen/lib/hot_cursor")
 include("argen/lib/core")
@@ -134,6 +137,12 @@ function sample.init_global_params(nb_arcs)
                end
                prev_global_transpose = v
   end}
+
+  if seamstress then
+    params:hide("filter_freq")
+    params:hide("filter_resonance")
+    params:hide("transpose")
+  end
 end
 
 function sample.global_pitch_transpose_delta(nb_arcs, d)
@@ -169,6 +178,10 @@ function sample.init_playback_folders()
 end
 
 function sample.init_params(nb_slots)
+  if seamstress then
+    return
+  end
+
   Timber.options.PLAY_MODE_BUFFER_DEFAULT = 4
   Timber.options.PLAY_MODE_STREAMING_DEFAULT = 3
   Timber.add_params()
@@ -186,6 +199,10 @@ function sample.init_params(nb_slots)
 end
 
 function sample.set_sefault_samples()
+  if seamstress then
+    return
+  end
+
   Timber.load_sample(1, _path.audio .. 'common/808/808-BD.wav')
   Timber.load_sample(2, _path.audio .. 'common/808/808-CH.wav')
   -- Timber.load_sample(2, _path.audio .. 'common/808/808-CY.wav')
@@ -208,14 +225,26 @@ function sample.is_any_ring_outmode(nb_arcs)
 end
 
 function sample.load_sample(slot_id, path)
+  if seamstress then
+    return
+  end
+
   Timber.load_sample(slot_id, path)
 end
 
 function sample.is_playing(slot_id)
+  if seamstress then
+    return false
+  end
+
   return tab.count(Timber.samples_meta[slot_id].positions) ~= 0
 end
 
 function sample.play(slot_id)
+  if seamstress then
+    return
+  end
+
   local vel = 1
   -- REVIEW: not sure explicit stop is really necessary
   if sample.is_playing(slot_id) then

@@ -59,16 +59,50 @@ local varc = include("argen/lib/varc")
 local playback = include("argen/lib/playback")
 local checkpoint = include("argen/lib/checkpoint")
 local sample = include("argen/lib/sample")
-local oilcan = include("argen/lib/oilcan")
+local oilcan
+if norns then
+  oilcan = include("argen/lib/oilcan")
+end
 
 include("argen/lib/core")
 local gutil = include("argen/lib/grid_utils")
+
+local kbdutil
+if seamstress then
+  kbdutil = include("argen/lib/kbdutil")
+end
+
+
+-- ------------------------------------------------------------------------
+
+if seamstress then
+  clock.get_beat_sec = clock.get_sec_per_beat
+
+  screen.aa = function (_v)
+  end
+
+  screen.fill = function (_v)
+  end
+
+  screen.stroke = function (_v)
+  end
+
+  screen.line_width = function (_v)
+  end
+
+  screen.level = function (v)
+    v = v * 10
+    screen.color(v, v, v)
+  end
+end
 
 
 -- ------------------------------------------------------------------------
 -- engine
 
-engine.name = "Timber"
+if norns then
+  engine.name = "Timber"
+end
 
 
 -- ------------------------------------------------------------------------
@@ -80,6 +114,8 @@ local VARC_RADIUS = 11
 local GRID_FPS = 15
 local ARC_REFRESH_SAMPLES = 10
 local UNQUANTIZED_SAMPLES = 128
+
+local DENSITY_MAX = 10
 
 local MCLOCK_DIV_DENOM = 32
 local MCLOCK_DIV = 1/MCLOCK_DIV_DENOM
@@ -243,6 +279,10 @@ function init()
   screen.aa(1)
   screen.line_width(1)
 
+  if seamstress then
+    screen.set_size(SCREEN_W, SCREEN_H, 5)
+  end
+
   checkpoint.init_dir()
 
   s_lattice = lattice:new{}
@@ -264,6 +304,9 @@ function init()
   params:add_option("flash", "Animation Flash", OFF_ON)
 
   params:add_option("gen_all_mode", "Randomize Mode", RANDOMIZE_MODES)
+  if seamstress then
+    params:hide("gen_all_mode")
+  end
 
   params:add_trigger("all_oilcan", "Init All Oilcan")
   params:set_action("all_oilcan",
@@ -284,13 +327,21 @@ function init()
                       end
   end)
 
+  if seamstress then
+    params:hide("all_oilcan")
+    params:hide("all_sample")
+  end
+
   params:add_trigger("gen_all", "Randomize")
   params:set_action("gen_all",
                     function(v)
                       srand(os.time())
 
                       local any_sample = sample.is_any_ring_outmode(ARCS)
-                      local any_oilcan = oilcan.is_any_ring_outmode(ARCS)
+                      local any_oilcan = false
+                      if norns then
+                        any_oilcan = oilcan.is_any_ring_outmode(ARCS)
+                      end
 
                       if params:string("gen_all_mode") == "ptrn+smpl"
                         or params:string("gen_all_mode") == "ptrn+kit" then
@@ -355,6 +406,8 @@ function init()
   hot_cursor.init(ARCS)
   pattern.init(ARCS)
 
+  -- NB: breaks after this
+
   for r=1,ARCS do
     is_firing[r] = false
     last_firing[r] = 0.0
@@ -367,9 +420,9 @@ function init()
                       pattern.gen_for_ring(r)
     end)
 
-
     params:add{type = "number", id = "ring_density_"..r, name = "Density "..r, min = 0, max = DENSITY_MAX, default = 0}
     params:set_action("ring_density_"..r, pattern.make_density_cb(r))
+
     params:add{type = "number", id = "ring_pattern_shift_"..r, name = "Pattern Shift "..r, min = -(ARC_SEGMENTS-1), max = (ARC_SEGMENTS-1), default = 0}
 
     params:add_option("ring_quantize_"..r, "Quantize "..r, ON_OFF)
@@ -392,8 +445,8 @@ function init()
     params:add{type = "number", id = "ring_bpm_"..r, name = "BPM "..r, min = -MAX_BPM, max = MAX_BPM, default = 20}
     params:hide("ring_bpm_"..r)
 
-
-    params:add_option("ring_out_mode_"..r, "Out Mode "..r, OUT_VOICE_MODES)
+    local default_out_mode = seamstress and "nb" or "sample"
+    params:add_option("ring_out_mode_"..r, "Out Mode "..r, OUT_VOICE_MODES, tab.key(OUT_VOICE_MODES, default_out_mode))
     params:set_action("ring_out_mode_"..r,
                       function(v)
                         if OUT_VOICE_MODES[v] == "nb" then
@@ -415,12 +468,13 @@ function init()
     params:add{type = "control", id = "ring_out_nb_vel_"..r, name = "nb Velocity "..r, controlspec = ControlSpec.new(0, 1, "lin", 0, 0.8, "")}
     params:add{type = "control", id = "ring_out_nb_dur_"..r, name = "nb Dur "..r, controlspec = ControlSpec.new(0, 1, "lin", 0, 0.2, "")}
 
-    params:hide("ring_out_nb_voice_"..r)
-    params:hide("ring_out_nb_note_"..r)
-    params:hide("ring_out_nb_vel_"..r)
-    params:hide("ring_out_nb_dur_"..r)
+    if not seamstress then
+      params:hide("ring_out_nb_voice_"..r)
+      params:hide("ring_out_nb_note_"..r)
+      params:hide("ring_out_nb_vel_"..r)
+      params:hide("ring_out_nb_dur_"..r)
+    end
   end
-
 
   sample.init_global_params(ARCS)
 
@@ -428,14 +482,19 @@ function init()
 
   playback.init_transport()
 
-  sample.init_playback_folders()
-  sample.init_params(ARCS)
+  if norns then
+    sample.init_playback_folders()
+    sample.init_params(ARCS)
+  end
+
 
   -- --------------------------------
   -- voice init
 
-  sample.set_sefault_samples()
-  oilcan.reset_all_rings_voice(ARCS)
+  if norns then
+    sample.set_sefault_samples()
+    oilcan.reset_all_rings_voice(ARCS)
+  end
 
 
   -- --------------------------------
@@ -678,6 +737,9 @@ function arc_redraw()
       local radial_pos = (i + display_pos) + params:get("ring_pattern_shift_"..r)
       while radial_pos < 0 do
         radial_pos = radial_pos + ARC_SEGMENTS
+      end
+      while radial_pos > ARC_SEGMENTS do
+        radial_pos = radial_pos - ARC_SEGMENTS
       end
 
       local l = 0
@@ -998,6 +1060,45 @@ end
 -- ------------------------------------------------------------------------
 -- controls
 
+if seamstress then
+  screen.key = function(char, modifiers, is_repeat, state)
+
+    if char == nil then
+      return
+    end
+
+    if type(char) == "string" then
+      if char == "s" and state >= 1 then
+        STATE.grid_mode = M_SCOPE
+      end
+
+      if char == "r" and state >= 1 then
+        params:set("gen_all", 1)
+        -- if #modifiers == 0 then
+        --   params:set("ring_gen_pattern_", 1)
+        -- elseif kbdutil.isShift(modifiers) then
+        --   params:set("gen_all", 1)
+        -- end
+      end
+    end
+
+    if char.name ~= nil then
+      if char.name == "left" and state >= 1 then
+        local sign = -1
+        prev_arc_cursor = arc_cursor
+        arc_cursor = util.clamp(arc_cursor + sign, 1, ARCS - arc_cursor_len() + 1)
+      end
+      if char.name == "right" and state >= 1 then
+        local sign = 1
+        prev_arc_cursor = arc_cursor
+        arc_cursor = util.clamp(arc_cursor + sign, 1, ARCS - arc_cursor_len() + 1)
+      end
+    end
+
+  end
+end
+
+
 local k1 = false
 local k2 = false
 local k3 = false
@@ -1085,7 +1186,7 @@ function enc(n, d)
         local sign = math.floor(d/math.abs(d))
         prev_arc_cursor = arc_cursor
         arc_cursor = util.clamp(arc_cursor + sign, 1, ARCS - arc_cursor_len() + 1)
-        register_change()
+        -- register_change()
       end
     else
       params:set("clock_tempo", params:get("clock_tempo") + d)
@@ -1199,17 +1300,21 @@ end
 function redraw()
   screen.clear()
 
+  screen.level(10)
+
   screen.move(1, 8)
   screen.text(params:get("clock_tempo") .. " BPM")
 
-  screen.move(55, 8)
-  screen.text(sample.format_st(params:lookup_param("transpose")))
+  if not seamstress then
+    screen.move(55, 8)
+    screen.text(sample.format_st(params:lookup_param("transpose")))
 
-  screen.move(95, 8)
-  screen.text(Formatters.format_freq(params:lookup_param("filter_freq")))
+    screen.move(95, 8)
+    screen.text(Formatters.format_freq(params:lookup_param("filter_freq")))
 
-  screen.move(95, 16)
-  screen.text("Q: "..params:get("filter_resonance"))
+    screen.move(95, 16)
+    screen.text("Q: "..params:get("filter_resonance"))
+  end
 
   local MAX_ARCS_PER_LINE = 4
 

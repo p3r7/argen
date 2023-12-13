@@ -12,12 +12,23 @@ local varc = {}
 local LEDS_OFFSET = 4
 
 local function redraw_circle(x, y, radius, level, fill)
-  screen.move(x + radius, y)
-  screen.circle(x, y, radius)
-  if fill then
-    screen.fill()
-  else
-    screen.stroke()
+  if seamstress then
+    screen.move(round(x), round(y))
+    screen.circle(radius)
+    if fill then
+      screen.circle_fill(radius)
+    else
+      screen.circle(radius)
+    end
+  end
+  if norns then
+    screen.move(x + radius, y)
+    screen.circle_fill(x, y, radius)
+    if fill then
+      screen.fill()
+    else
+      screen.stroke()
+    end
   end
 end
 
@@ -26,9 +37,13 @@ local function redraw_leds(x, y, radius, level, leds, offset)
   for i=1,segments do
     if leds[i] == 1 then
       local radial_pos = i + offset + (segments/4)
-      screen.pixel(x + radius * cos(radial_pos/segments) * -1, y + radius * sin(radial_pos/segments))
+      if seamstress then
+        screen.pixel(round(x + radius * cos(radial_pos/segments) * -1), round(y + radius * sin(radial_pos/segments)))
+      else
+        screen.pixel(x + radius * cos(radial_pos/segments) * -1, y + radius * sin(radial_pos/segments))
     end
   end
+end
 end
 
 function varc.redraw(x, y, radius, level, fill, leds, offset)

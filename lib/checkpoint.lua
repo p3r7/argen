@@ -18,21 +18,35 @@ end
 -- ------------------------------------------------------------------------
 
 local TMP_DIR = '/dev/shm/'
+if seamstress then
+  TMP_DIR = '/tmp/'
+end
+
+function get_script_shortname()
+  if norns then
+    return norns.state.shortname
+  end
+  if seamstress then
+    return seamstress.state.shortname
+  end
+end
 
 function checkpoint.create_dir()
-  if norns.state.shortname == nil or norns.state.shortname == "" then
+  local shortname = get_script_shortname()
+  if shortname == nil or shortname == "" then
     return
   end
-  local CHECKPOINT_DIR = TMP_DIR .. norns.state.shortname ..'/'
+  local CHECKPOINT_DIR = TMP_DIR .. shortname ..'/'
 
   util.make_dir(CHECKPOINT_DIR)
 end
 
 function checkpoint.clear_dir()
-  if norns.state.shortname == nil or norns.state.shortname == "" then
+  local shortname = get_script_shortname()
+  if shortname == nil or shortname == "" then
     return
   end
-  local CHECKPOINT_DIR = TMP_DIR .. norns.state.shortname ..'/'
+  local CHECKPOINT_DIR = TMP_DIR .. shortname ..'/'
 
   os.execute("rm -f " .. CHECKPOINT_DIR .. '*')
 end
@@ -45,10 +59,11 @@ end
 
 -- basically `ParamSet:write` but in tmpfs
 function checkpoint.write(id)
-  if norns.state.shortname == nil or norns.state.shortname == "" then
+  local shortname = get_script_shortname()
+  if shortname == nil or shortname == "" then
     return
   end
-  local CHECKPOINT_DIR = TMP_DIR .. norns.state.shortname ..'/'
+  local CHECKPOINT_DIR = TMP_DIR .. shortname ..'/'
 
   local filename = CHECKPOINT_DIR .. id .. ".checkpoint"
 
@@ -73,10 +88,11 @@ end
 
 -- basically `ParamSet:read`
 function checkpoint.read(id)
-  if norns.state.shortname == nil or norns.state.shortname == "" then
+  local shortname = get_script_shortname()
+  if shortname == nil or shortname == "" then
     return
   end
-  local CHECKPOINT_DIR = TMP_DIR .. norns.state.shortname ..'/'
+  local CHECKPOINT_DIR = TMP_DIR .. shortname ..'/'
 
   local filename = CHECKPOINT_DIR .. id .. ".checkpoint"
 
