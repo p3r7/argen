@@ -311,13 +311,13 @@ function init()
   params:add_trigger("all_oilcan", "Init All Oilcan")
   params:set_action("all_oilcan",
                     function(v)
-                        if not oilcan.is_loaded() then
-                          return
-                        end
-                        for r=1,ARCS do
-                          params:set("ring_out_mode_"..r, tab.key(OUT_VOICE_MODES, "nb"))
-                        end
-                        oilcan.reset_all_rings_voice(ARCS, true)
+                      if not oilcan.is_loaded() then
+                        return
+                      end
+                      for r=1,ARCS do
+                        params:set("ring_out_mode_"..r, tab.key(OUT_VOICE_MODES, "nb"))
+                      end
+                      oilcan.reset_all_rings_voice(ARCS, true)
   end)
   params:add_trigger("all_sample", "Init All Sample")
   params:set_action("all_sample",
@@ -398,7 +398,7 @@ function init()
                       end
 
 
-                    -- end
+                      -- end
   end)
 
   playback.init(ARCS)
@@ -417,7 +417,7 @@ function init()
     params:add_trigger("ring_gen_pattern_"..r, "Generate "..r)
     params:set_action("ring_gen_pattern_"..r,
                       function(v)
-                      pattern.gen_for_ring(r)
+                        pattern.gen_for_ring(r)
     end)
 
     params:add{type = "number", id = "ring_density_"..r, name = "Density "..r, min = 0, max = DENSITY_MAX, default = 0}
@@ -1359,6 +1359,7 @@ function redraw()
 
     if params:string("ring_quantize_"..r) == "off" then
       screen.pixel(x, y)
+      screen.stroke()
     end
 
     screen.level(15)
@@ -1390,28 +1391,40 @@ function redraw()
     ri = ri + 1
   end
 
+  screen.line_width(1)
   if start > 1 then
+
+    screen.aa(1)
     screen.move(8, SCREEN_H*1/3)
     screen.line(4, SCREEN_H*1/3 + 3)
     screen.move(4, SCREEN_H*1/3 + 3)
     screen.line(8, SCREEN_H*1/3 + 6)
     screen.stroke()
 
+    screen.aa(0)
     for i=1,start-1 do
       screen.pixel(9 + (2*i), SCREEN_H*1/3)
     end
+    screen.stroke()
+
   end
   if start+MAX_ARCS_PER_LINE-1 < ARCS then
+
+    screen.aa(1)
     screen.move(SCREEN_W-8, SCREEN_H*1/3)
     screen.line(SCREEN_W-4, SCREEN_H*1/3 + 3)
     screen.move(SCREEN_W-4, SCREEN_H*1/3 + 3)
     screen.line(SCREEN_W-8, SCREEN_H*1/3 + 6)
     screen.stroke()
 
+    screen.aa(0)
     for i=1,(ARCS-start-(MAX_ARCS_PER_LINE-1)) do
       screen.pixel(SCREEN_W-9 - (2*i), SCREEN_H*1/3)
+      screen.stroke()
     end
   end
+
+  screen.aa(1)
 
   screen.update()
 end

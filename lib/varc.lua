@@ -41,13 +41,15 @@ local function redraw_leds(x, y, radius, level, leds, offset)
         screen.pixel(round(x + radius * cos(radial_pos/segments) * -1), round(y + radius * sin(radial_pos/segments)))
       else
         screen.pixel(x + radius * cos(radial_pos/segments) * -1, y + radius * sin(radial_pos/segments))
+      end
     end
   end
-end
+  screen.stroke()
 end
 
 function varc.redraw(x, y, radius, level, fill, leds, offset)
   screen.level(level)
+  screen.aa(1)
   redraw_circle(x, y, radius, level, fill)
   redraw_leds(x, y, radius + LEDS_OFFSET, level, leds, offset)
 end
