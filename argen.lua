@@ -1393,14 +1393,24 @@ function redraw()
   if start > 1 then
     screen.move(8, SCREEN_H*1/3)
     screen.line(4, SCREEN_H*1/3 + 3)
+    screen.move(4, SCREEN_H*1/3 + 3)
     screen.line(8, SCREEN_H*1/3 + 6)
     screen.stroke()
+
+    for i=1,start-1 do
+      screen.pixel(9 + (2*i), SCREEN_H*1/3)
+    end
   end
   if start+MAX_ARCS_PER_LINE-1 < ARCS then
     screen.move(SCREEN_W-8, SCREEN_H*1/3)
     screen.line(SCREEN_W-4, SCREEN_H*1/3 + 3)
+    screen.move(SCREEN_W-4, SCREEN_H*1/3 + 3)
     screen.line(SCREEN_W-8, SCREEN_H*1/3 + 6)
     screen.stroke()
+
+    for i=1,(ARCS-start-(MAX_ARCS_PER_LINE-1)) do
+      screen.pixel(SCREEN_W-9 - (2*i), SCREEN_H*1/3)
+    end
   end
 
   screen.update()
