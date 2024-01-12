@@ -23,7 +23,7 @@ local function redraw_circle(x, y, radius, level, fill)
   end
   if norns then
     screen.move(x + radius, y)
-    screen.circle_fill(x, y, radius)
+    screen.circle(x, y, radius)
     if fill then
       screen.fill()
     else
